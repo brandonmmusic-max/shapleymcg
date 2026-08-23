@@ -1,0 +1,30 @@
+name = "gemma4-26b-a4b-portability-v1"
+output_dir = "artifacts/gemma4-26b-a4b-portability-v1"
+
+[model]
+model_id = "google/gemma-4-26B-A4B"
+revision = "24548b62aa021d562695c04aaf7758a1ea47990b"
+family = "gemma4"
+local_path = "models/gemma-4-26B-A4B"
+trust_remote_code = false
+
+[corpus]
+input_jsonl = "data/calibration-documents.jsonl"
+tokenizer_id = "google/gemma-4-26B-A4B"
+window_tokens = 2048
+seed = 20260823
+fit_windows = 32
+selection_windows = 16
+confirmation_windows = 16
+final_windows = 25
+minimum_domains = 4
+
+[codec]
+bits = [2, 3, 4, 5]
+group_size = 128
+
+[objective]
+path_nodes = 5
+fisher_rank = 32
+bootstrap_samples = 2000
+reanchor_every_layers = 4

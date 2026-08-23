@@ -1,0 +1,31 @@
+name = "qwen3-30b-a3b-as-mcg-pilot-v1"
+output_dir = "artifacts/qwen3-30b-a3b-as-mcg-pilot-v1"
+
+[model]
+model_id = "Qwen/Qwen3-30B-A3B-Base"
+revision = "1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9"
+family = "qwen3_moe"
+local_path = "models/Qwen3-30B-A3B-Base"
+trust_remote_code = false
+
+[corpus]
+input_jsonl = "data/calibration-documents.jsonl"
+tokenizer_id = "Qwen/Qwen3-30B-A3B-Base"
+window_tokens = 2048
+seed = 20260823
+fit_windows = 32
+selection_windows = 16
+confirmation_windows = 16
+final_windows = 25
+minimum_domains = 4
+
+[codec]
+bits = [2, 3, 4, 5]
+group_size = 128
+symmetric = true
+
+[objective]
+path_nodes = 5
+fisher_rank = 32
+bootstrap_samples = 2000
+reanchor_every_layers = 4

@@ -1,0 +1,26 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e '.[hf,test]'
+      - run: python -m compileall -q src
+      - run: pytest -q
+      - run: python -m pip wheel . --no-deps --wheel-dir wheelhouse
+      - run: |
+          python -m venv --system-site-packages wheel-smoke
+          wheel-smoke/bin/pip install --no-deps wheelhouse/*.whl
+          wheel-smoke/bin/quant-pipeline --help
+          wheel-smoke/bin/python -c "import quant_pipeline.models.inventory"
