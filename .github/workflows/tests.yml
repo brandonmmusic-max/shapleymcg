@@ -24,3 +24,4 @@ jobs:
           wheel-smoke/bin/pip install --no-deps wheelhouse/*.whl
           wheel-smoke/bin/quant-pipeline --help
           wheel-smoke/bin/python -c "import quant_pipeline.models.inventory"
+          test -f wheel-smoke/lib/python3.12/site-packages/quant_pipeline/THIRD_PARTY_NOTICES.md

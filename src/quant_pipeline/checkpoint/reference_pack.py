@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from ..codecs.uniform import QuantizedArray, dequantize, quantize
-from ..core.artifacts import sha256_file, write_json
+from ..core.artifacts import prepare_empty_destination, sha256_file, write_json
 from ..models.inventory import QuantUnit, load_inventory
 
 
@@ -41,8 +41,7 @@ def encode_reference_checkpoint(
         raise _dependency_error("torch and safetensors", error)
 
     source = Path(model_path)
-    destination = Path(output_dir)
-    destination.mkdir(parents=True, exist_ok=True)
+    destination = prepare_empty_destination(output_dir)
     config_path = source / "config.json"
     index_path = source / "model.safetensors.index.json"
     index = json.loads(index_path.read_text())["weight_map"]

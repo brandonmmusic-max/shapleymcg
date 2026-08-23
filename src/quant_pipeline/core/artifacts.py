@@ -58,6 +58,19 @@ def bind_files(paths: list[str | Path]) -> dict[str, dict[str, int | str]]:
     return bound
 
 
+def prepare_empty_destination(path: str | Path) -> Path:
+    """Create a destination or fail closed if it contains any prior artifact."""
+    destination = Path(path)
+    if destination.exists():
+        if not destination.is_dir():
+            raise ValueError(f"destination exists and is not a directory: {destination}")
+        if next(destination.iterdir(), None) is not None:
+            raise FileExistsError(f"destination is not empty; inspect and choose a new path: {destination}")
+    else:
+        destination.mkdir(parents=True)
+    return destination
+
+
 def require_execute(execute: bool, action: str) -> None:
     if not execute:
         raise RuntimeError(f"refusing to {action}: pass --execute after reviewing the sealed plan")

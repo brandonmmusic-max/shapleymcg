@@ -22,6 +22,9 @@ quant-pipeline = "quant_pipeline.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/quant_pipeline"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"THIRD_PARTY_NOTICES.md" = "quant_pipeline/THIRD_PARTY_NOTICES.md"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

@@ -1,12 +1,29 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import re
+import subprocess
 from pathlib import Path
 
 from ..calibration.windows import verify_sealed_corpus
-from ..core.artifacts import bind_files, require_execute, sha256_file, write_json
+from ..core.artifacts import bind_files, prepare_empty_destination, require_execute, sha256_file, write_json
+
+
+def _nvidia_driver_version() -> str | None:
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return None
+    values = sorted({line.strip() for line in result.stdout.splitlines() if line.strip()})
+    return ",".join(values) or None
 
 
 def capture_logits(
@@ -31,8 +48,7 @@ def capture_logits(
     sealed = json.loads(Path(sealed_corpus).read_text())
     verify_sealed_corpus(sealed)
     windows = sealed["windows"][role]
-    destination = Path(output_dir)
-    destination.mkdir(parents=True, exist_ok=True)
+    destination = prepare_empty_destination(output_dir)
     torch_dtype = getattr(torch, dtype)
     local_model = Path(model_path)
     if not local_model.is_dir():
@@ -80,6 +96,9 @@ def capture_logits(
             "python": platform.python_version(),
             "torch": torch.__version__,
             "torch_cuda": torch.version.cuda,
+            "nvidia_driver": _nvidia_driver_version(),
+            "image_digest": os.environ.get("QUANT_PIPELINE_IMAGE_DIGEST"),
+            "runpod_pod_id": os.environ.get("RUNPOD_POD_ID"),
             "transformers": __import__("transformers").__version__,
             "safetensors": __import__("safetensors").__version__,
             "device_map": device_map,
