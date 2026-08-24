@@ -10,7 +10,7 @@ the expanded validation reconstruction to a compact runtime checkpoint.
 
 | Requirement | Current evidence | Result |
 | --- | --- | --- |
-| Executable calibration-to-encoding implementation | Current `publish/v0.2` history contains the fixed-Hadamard and causal paths; current suite collects 264 tests | Proven for the fixed-Hadamard and causal Base experiments |
+| Executable calibration-to-encoding implementation | GitHub commit `2fadc8f7e322376cf0b0f9e69ac301f59d74b580` contains the fixed-Hadamard and causal paths; its full suite passes 246 tests with 19 explicit skips | Proven for the fixed-Hadamard and causal Base experiments |
 | Immutable Base parent | `Qwen/Qwen3-30B-A3B-Base@1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9`; source receipt is in the control bundle | Proven |
 | Historical GLM KLD procedure lineage | Pinned `Salesforce/wikitext` revision, source prefix, Qwen token IDs, construction rules, KLD window, and Qwen BF16 teacher logits are all sealed in the bundle | Proven as a target-tokenized reproduction of the procedure, not reused GLM token IDs/logits |
 | Calibration identity and role separation | Original and role-safe JSONL, sealed corpus, fit/selection/confirmation capture manifests, exact token hashes, and receipts are in the bundle | Proven |
@@ -26,8 +26,12 @@ the expanded validation reconstruction to a compact runtime checkpoint.
 ### Reproducibility dataset
 
 - Repository: `brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility`
-- Audited repository head: `89b989fc45cba9e841c5083d38c16cd8734041bb`
+- Current audited repository head: `18dec5c769b4e39ee641067d0aea462e9c9406e6`
 - Fixed control folder revision: `c9c2b001dd943b8251fc0102ec76ab1b8d572219`
+- All 37,301 current files under `fits/`, `candidates/`, and
+  `controls/fixed-hadamard-k34-v1/` are metadata-identical to that immutable
+  control revision (size plus LFS SHA-256 or Git blob identity; zero missing,
+  changed, or extra files).
 - Remote control folder: 53 files, 2,715,887,831 bytes
 - Manifest inventory: 52 files; every row rechecked against remote size and
   either Hub LFS SHA-256 or a fresh-download SHA-256
@@ -39,8 +43,17 @@ the expanded validation reconstruction to a compact runtime checkpoint.
   `b0af2ce0c0af3bafd1b8e5a101269a1c91fdf2f9d2cce105321b63b3ee130895`
 - Per-layer receipts: 48 fit plus 48 candidate receipts; all internal seals,
   layer identities, repository paths, byte counts, and bundle references match
+- The 96 per-layer manifests cover 37,152 payload files and
+  259,295,735,932 bytes. Every fit and candidate internal manifest/receipt seal
+  revalidated; every candidate layer covers experts 0 through 127, 384 matrices,
+  and 768 K3/K4 candidates.
 - Causal evidence content revision: `a1f669e5b42f041fa28017670fd86b183f5103d0`
-- Final dataset-card revision: `89b989fc45cba9e841c5083d38c16cd8734041bb`
+- Previously audited causal/card revision:
+  `89b989fc45cba9e841c5083d38c16cd8734041bb`
+- All 94 files under `causal-arm-v3/` at the current head are
+  metadata-identical to that audited revision (zero missing, changed, or extra
+  files).
+- Current dataset-card revision: `18dec5c769b4e39ee641067d0aea462e9c9406e6`
 - Validation-model receipt mirror:
   `causal-arm-v3/validation-model-hf-publication-receipt.json` (remote file
   SHA-256 `778670c94a6db7d8147d3ee4757064fe3dcf586dfee22765917074be9f8c462a`)
@@ -55,6 +68,8 @@ the expanded validation reconstruction to a compact runtime checkpoint.
   `c3447f3f8e231ae83afa10ba263346d1ceb98c11`
 - Publication-receipt revision:
   `fbdd05904fd4018dea9fd0f25ed4800c15df1493`
+- Current model-card revision:
+  `785cb47dbd900ed4a3f045b5f9f7a638db72841e`
 - Verified content inventory: 31 files, 61,079,798,645 bytes
 - Model manifest inventory: 30 payload files plus the manifest; every row was
   rechecked against remote size and either Hub LFS SHA-256 or Git-blob SHA-1
@@ -68,6 +83,10 @@ the expanded validation reconstruction to a compact runtime checkpoint.
   `247179326b2dd6b0f904d1ca976e4086920c0b3ce4a3b2421e481b51e822e717`
 - The reloaded checkpoint's 2,047-position logit tensor matched the measured
   causal student bit-for-bit (`max_abs_delta = 0`).
+- Every non-README payload file at the current model-card revision remains
+  byte-identical to the publication-receipt revision. The README is deliberately
+  outside that payload-identity assertion because the model card was updated
+  after the sealed checkpoint publication.
 
 ## Corpus and evaluation seals
 
@@ -91,6 +110,11 @@ pinned WikiText-2 raw test prefix and scores 2,047 next-token positions. The
 source text and construction procedure are inherited from the GLM evaluation;
 the token IDs and logits are necessarily regenerated with Qwen.
 
+The sealed corpus contains 32 fit, 16 selection, 16 confirmation, and 25 final
+windows. Every stored token hash revalidated, and document-ID overlap is zero
+for every pair of roles. The BF16 teacher-logit LFS object is 1,294,388,616
+bytes and its remote SHA-256 exactly matches the capture receipt.
+
 ## Measured control
 
 - Allocation seal:
@@ -113,6 +137,12 @@ the token IDs and logits are necessarily regenerated with Qwen.
   `10bb3b71a2258500b281e3b37d57657e5e0ecf9318bb9c1a3fc6dbd2326e63c4`
 - Exact rate: 9,216 K3 plus 9,216 K4 routed-expert matrix choices
 - Changed placements versus historical allocation: 9,392 / 18,432
+- Matched 2,047-position historical / causal mean KLD:
+  `0.06249572628978888` / `0.05506107074246945`
+- Relative KLD reduction on that matched window: `0.11896262334556107`
+  (11.896262%)
+- Historical / causal top-1 agreement on that window:
+  `0.9013190034196384` / `0.912066438690767`
 - Matched 20,480-position historical / causal mean KLD:
   `0.04908888647295481` / `0.04529370272688347`
 - Relative KLD reduction: `0.0773124839195991` (7.731248%)
@@ -120,6 +150,11 @@ the token IDs and logits are necessarily regenerated with Qwen.
 - Causal / historical independent verification seals:
   `6e4215f276d69ca53ce1ed29c2a900f5e040d41594a9e2ab24cb247ddec90265` /
   `752e83112522f1f8bfe2cbf7797196cc7961164b7617ccb22d92f7e60c8a1911`
+- A fresh cross-binding audit passed 25 / 25 checks: allocation to reconciled
+  attribution and candidate inventory, both reports to their allocations,
+  comparison records to report hashes and file hashes, and both independent
+  20,480-position replays. Both 20,480-position replays have
+  `max_absolute_delta = 0`.
 
 ## Reproduction entry points
 
