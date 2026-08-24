@@ -30,9 +30,7 @@ def _source_identity(path: Path, expected_revision: str) -> str:
     receipt = json.loads(path.read_text())
     expected = receipt.get("receipt_sha256")
     body = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
-    actual = sha256_bytes(
-        json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-    )
+    actual = sha256_bytes(canonical_json(body))
     if expected != actual:
         raise ValueError("source-checkpoint receipt seal mismatch")
     if receipt.get("revision") != expected_revision:

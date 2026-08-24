@@ -1,8 +1,11 @@
 import json
 import os
+import runpy
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from quant_pipeline.core.artifacts import canonical_json, sha256_bytes
 
@@ -39,6 +42,18 @@ def test_turboderp_lineage_plan_pins_historical_source(tmp_path):
     assert plan["source_revision"] == "4c446470ba0aec43e22ac1128f9ffd915f338ba3"
     assert plan["reference_revision"] == "0b83e92c6d3b5a868ecd5a5fbb3bcc1920e388ef"
     assert not output.exists()
+
+
+def test_streaming_fit_accepts_repository_canonical_source_seal(tmp_path):
+    pytest.importorskip("torch")
+    revision = "4c446470ba0aec43e22ac1128f9ffd915f338ba3"
+    receipt = _write_sealed(
+        tmp_path / "source.json",
+        {"schema": "fixture", "revision": revision},
+        "receipt_sha256",
+    )
+    namespace = runpy.run_path(str(ROOT / "scripts/run_qwen_streaming_fit.py"))
+    assert namespace["_source_identity"](tmp_path / "source.json", revision) == receipt["receipt_sha256"]
 
 
 def test_hybrid_k4_plan_is_nonmutating_and_names_three_arms(tmp_path):
