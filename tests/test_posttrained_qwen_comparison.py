@@ -92,6 +92,27 @@ def test_hybrid_k4_plan_is_nonmutating_and_names_three_arms(tmp_path):
     assert not output.exists()
 
 
+def test_fit_route_coverage_extension_defaults_to_dry_run(tmp_path):
+    output = tmp_path / "extended.json"
+    result = run(
+        "extend_qwen_fit_route_coverage.py",
+        "--model",
+        str(tmp_path / "model"),
+        "--model-revision",
+        "4c446470ba0aec43e22ac1128f9ffd915f338ba3",
+        "--sealed-corpus",
+        str(tmp_path / "corpus.json"),
+        "--capture-root",
+        str(tmp_path / "capture"),
+        "--output",
+        str(output),
+    )
+    plan = json.loads(result.stdout)
+    assert plan["dry_run"] is True
+    assert plan["max_candidates"] == 256
+    assert not output.exists()
+
+
 def test_checked_in_naive_control_record_is_sealed():
     path = ROOT / "results/qwen3-30b-a3b-base/naive-3p5-controls-summary.json"
     record = json.loads(path.read_text())
