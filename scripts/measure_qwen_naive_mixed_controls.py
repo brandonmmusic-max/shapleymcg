@@ -213,7 +213,7 @@ def _score(
         "router_precision": "source BF16",
         "lm_head_precision": "source BF16",
         "kv_cache": "disabled (use_cache=False)",
-        "metric": "float32 mean tokenwise KL(Base BF16 || reconstructed student)",
+        "metric": "float32 mean tokenwise KL(source BF16 || reconstructed student)",
         "summary": summarize(matrix.reshape(-1)),
         "mean_of_row_means": float(row_means.mean()),
         "sample_std_of_row_means": float(row_means.std(ddof=1)),
@@ -232,6 +232,11 @@ def main() -> int:
     parser.add_argument("--source-model", type=Path, required=True)
     parser.add_argument("--encode-root", type=Path, required=True)
     parser.add_argument("--panel-root", type=Path, required=True)
+    parser.add_argument(
+        "--selected-report",
+        type=Path,
+        help="selected-allocation KLD report (default: <panel-root>/kld-report.json)",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seeds", type=int, nargs="+", default=list(DEFAULT_SEEDS))
     parser.add_argument("--workers", type=int, default=8)
@@ -245,6 +250,13 @@ def main() -> int:
         "source_model": str(args.source_model.resolve()),
         "encode_root": str(args.encode_root.resolve()),
         "panel_root": str(args.panel_root.resolve()),
+        "selected_report": str(
+            (
+                args.selected_report.resolve()
+                if args.selected_report is not None
+                else args.panel_root.resolve() / "kld-report.json"
+            )
+        ),
         "output": str(args.output.resolve()),
         "seeds": args.seeds,
         "workers": args.workers,
@@ -277,7 +289,16 @@ def main() -> int:
     teacher_paths = sorted((panel_root / "teacher-logits").glob("row-*.safetensors"))
     if len(teacher_paths) != ROWS:
         raise ValueError("comparison panel lacks ten BF16 teacher rows")
-    mixed = json.loads((panel_root / "kld-report.json").read_text())
+    selected_report = (
+        args.selected_report.resolve()
+        if args.selected_report is not None
+        else panel_root / "kld-report.json"
+    )
+    mixed = json.loads(selected_report.read_text())
+    if mixed.get("report_sha256") != _hash_json(
+        {key: value for key, value in mixed.items() if key != "report_sha256"}
+    ):
+        raise ValueError("selected-allocation KLD report seal mismatch")
 
     model = AutoModelForCausalLM.from_pretrained(
         args.source_model.resolve(),
