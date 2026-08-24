@@ -28,6 +28,20 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def hash_json(value: dict) -> str:
+    encoded = (
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def load_logits(path: Path) -> torch.Tensor:
     with safe_open(path, framework="pt", device="cpu") as handle:
         return handle.get_tensor("logits").float()
@@ -36,16 +50,32 @@ def load_logits(path: Path) -> torch.Tensor:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("result", type=Path)
+    parser.add_argument("--teacher-root", type=Path)
     parser.add_argument("--atol", type=float, default=2e-6)
     args = parser.parse_args()
 
     root = args.result.resolve()
     report = json.loads((root / "kld-report.json").read_text())
     stored = np.load(root / "token-kld.npy").astype(np.float32, copy=False).reshape(-1)
-    teacher_paths = sorted((root / "teacher-logits").glob("row-*.safetensors"))
+    teacher_root = args.teacher_root.resolve() if args.teacher_root else root / "teacher-logits"
+    teacher_paths = sorted(teacher_root.glob("row-*.safetensors"))
     student_paths = sorted((root / "student-logits").glob("row-*.safetensors"))
     if len(teacher_paths) != len(student_paths) or not teacher_paths:
         raise ValueError("teacher/student capture count mismatch")
+    if "report_sha256" in report and report["report_sha256"] != hash_json(
+        {key: value for key, value in report.items() if key != "report_sha256"}
+    ):
+        raise ValueError("KLD report seal mismatch")
+    if "teacher_files" in report:
+        expected = [row["sha256"] for row in report["teacher_files"]]
+        observed = [sha256_file(path) for path in teacher_paths]
+        if expected != observed:
+            raise ValueError("teacher file inventory drifted")
+    if "student_files" in report:
+        expected = [row["sha256"] for row in report["student_files"]]
+        observed = [sha256_file(path) for path in student_paths]
+        if expected != observed:
+            raise ValueError("student file inventory drifted")
 
     values: list[np.ndarray] = []
     agreements = 0
@@ -92,7 +122,14 @@ def main() -> int:
         "independent_top1_agreement": observed_top1,
         "reported_top1_agreement": reported_top1,
         "atol": args.atol,
+        "attention_backend": report.get("attention_backend"),
+        "panel_sha256": report.get("panel_sha256"),
+        "report_sha256": report.get("report_sha256"),
+        "report_file_sha256": sha256_file(root / "kld-report.json"),
+        "teacher_files": [sha256_file(path) for path in teacher_paths],
+        "student_files": [sha256_file(path) for path in student_paths],
     }
+    result["verification_sha256"] = hash_json(result)
     destination = root / "independent-verification.json"
     destination.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     print(json.dumps(result, sort_keys=True))
