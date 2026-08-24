@@ -119,6 +119,11 @@ def main() -> int:
     parser.add_argument("--kind", choices=("fit", "candidate"), required=True)
     parser.add_argument("--kld-exit", type=Path)
     parser.add_argument("--delete-verified", action="store_true")
+    parser.add_argument(
+        "--include-receipted",
+        action="store_true",
+        help="re-upload layers that already have a locally verified Hub receipt",
+    )
     parser.add_argument("--retry-minutes", type=float, default=75.0)
     args = parser.parse_args()
     if args.retry_minutes < 0:
@@ -144,6 +149,10 @@ def main() -> int:
     layer_roots = sorted(
         path for path in data_root.glob("layer-[0-9][0-9][0-9]") if path.is_dir()
     )
+    if not args.include_receipted:
+        layer_roots = [
+            path for path in layer_roots if not (receipt_root / f"{path.name}.json").is_file()
+        ]
     if not layer_roots:
         raise ValueError(f"no local {args.kind} layers remain")
 
