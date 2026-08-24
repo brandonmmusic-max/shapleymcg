@@ -329,6 +329,54 @@ def _load_existing_arm(
     return report
 
 
+def _load_existing_allocation(output: Path, candidate_receipts: list[dict]) -> dict | None:
+    """Adopt a sealed allocation after checking it against current layer receipts.
+
+    A completed all-K4 replay already establishes the candidate tensors used by
+    the interrupted run. On resume, this avoids hashing the same ~142 GB again.
+    """
+    path = output / "selected-allocation.json"
+    if not path.is_file():
+        return None
+    allocation = json.loads(path.read_text())
+    expected = allocation.get("allocation_sha256")
+    unsealed = {
+        key: value for key, value in allocation.items() if key != "allocation_sha256"
+    }
+    if expected != _hash_json(unsealed):
+        raise ValueError("existing selected allocation seal mismatch")
+    if (
+        allocation.get("schema") != "quant-pipeline.qwen-fast-k34-allocation.v2"
+        or len(allocation.get("choices", [])) != 48 * 128 * 3
+        or len(allocation.get("encode_receipts", [])) != 48
+    ):
+        raise ValueError("existing selected allocation inventory mismatch")
+    current = {int(row["layer"]): row for row in candidate_receipts}
+    for sealed in allocation["encode_receipts"]:
+        live = current.get(int(sealed["layer"]))
+        for field in (
+            "receipt_sha256",
+            "candidate_tensor_sha256",
+            "candidate_tensor_bytes",
+        ):
+            if live is None or live.get(field) != sealed.get(field):
+                raise ValueError(
+                    f"existing allocation disagrees with layer {sealed['layer']} {field}"
+                )
+    print(
+        json.dumps(
+            {
+                "stage": "adopt-existing-allocation",
+                "allocation_sha256": expected,
+                "average_weight_bits": allocation["average_weight_bits"],
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    return allocation
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-model", type=Path, required=True)
@@ -412,9 +460,13 @@ def main() -> int:
         output.mkdir(parents=True, exist_ok=False)
         write_json(output / "plan.json", execution_plan)
     candidate_receipts = _verify_candidate_inventory(args.encode_root.resolve())
-    allocation_receipts, candidate_rows = _load_candidates(args.encode_root.resolve())
-    selected_allocation = _allocate(allocation_receipts, candidate_rows)
-    write_json(output / "selected-allocation.json", selected_allocation)
+    selected_allocation = (
+        _load_existing_allocation(output, candidate_receipts) if args.resume else None
+    )
+    if selected_allocation is None:
+        allocation_receipts, candidate_rows = _load_candidates(args.encode_root.resolve())
+        selected_allocation = _allocate(allocation_receipts, candidate_rows)
+        write_json(output / "selected-allocation.json", selected_allocation)
     selected_choices = {
         (int(row["layer"]), int(row["expert"]), str(row["projection"])): int(row["bits"])
         for row in selected_allocation["choices"]

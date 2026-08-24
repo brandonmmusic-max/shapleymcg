@@ -134,6 +134,48 @@ def test_hybrid_k4_resume_adopts_only_fully_sealed_arm(tmp_path):
         namespace["_load_existing_arm"](tmp_path, arm, teacher)
 
 
+def test_hybrid_k4_resume_adopts_sealed_allocation_without_tensor_rehash(tmp_path):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    try:
+        namespace = runpy.run_path(
+            str(ROOT / "scripts/measure_qwen_turboderp_hybrid_k4.py")
+        )
+    finally:
+        sys.path.pop(0)
+    receipts = [
+        {
+            "layer": layer,
+            "receipt_sha256": f"receipt-{layer}",
+            "candidate_tensor_sha256": f"tensor-{layer}",
+            "candidate_tensor_bytes": layer + 100,
+        }
+        for layer in range(48)
+    ]
+    allocation = {
+        "schema": "quant-pipeline.qwen-fast-k34-allocation.v2",
+        "average_weight_bits": 3.5,
+        "encode_receipts": receipts,
+        "choices": [
+            {
+                "layer": layer,
+                "expert": expert,
+                "projection": projection,
+                "bits": 3,
+            }
+            for layer in range(48)
+            for expert in range(128)
+            for projection in ("gate_proj", "up_proj", "down_proj")
+        ],
+    }
+    allocation["allocation_sha256"] = namespace["_hash_json"](allocation)
+    (tmp_path / "selected-allocation.json").write_text(json.dumps(allocation))
+    adopted = namespace["_load_existing_allocation"](tmp_path, receipts)
+    assert adopted["allocation_sha256"] == allocation["allocation_sha256"]
+    receipts[0]["candidate_tensor_bytes"] += 1
+    with pytest.raises(ValueError, match="disagrees with layer 0"):
+        namespace["_load_existing_allocation"](tmp_path, receipts)
+
+
 def test_fit_route_coverage_extension_defaults_to_dry_run(tmp_path):
     output = tmp_path / "extended.json"
     result = run(
