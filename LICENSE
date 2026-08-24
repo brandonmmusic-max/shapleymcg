@@ -235,7 +235,7 @@ Each repository below is published at huggingface.co/0xSero. Dates are repositor
 | 2026-08-22 | Licensor's full-catalog audit |
 | 2026-08-23 | Licensor publishes ShapleyMcg under this License |
 
-Requests for the underlying evidence may be directed to [contact email].
+Requests for the underlying evidence may be directed through the Canonical Repository.
 
 ---
 
@@ -250,9 +250,8 @@ Requests for the underlying evidence may be directed to [contact email].
 ```bibtex
 @misc{music2026shapleymcg,
   author = {Music, Brandon M.},
-  title  = {ShapleyMcg: Full calibration encoding and quantization based upon
-            the Shapley paper, per-expert allocation, MCG codex, EXL3 and
-            trellis quantization format},
+  title  = {ShapleyMCG: An Auditable Calibration-to-Encoding Pipeline for
+            Low-Bit Mixture-of-Experts Models},
   year   = {2026},
   url    = {https://github.com/brandonmmusic-max/shapleymcg},
   note   = {Licensed under the ShapleyMcg License v1.0}
@@ -264,7 +263,7 @@ Requests for the underlying evidence may be directed to [contact email].
 ```yaml
 license: other
 license_name: shapleymcg-license-1.0
-license_link: https://github.com/brandonmmusic-max/shapleymcg/blob/main/LICENSE.md
+license_link: https://github.com/brandonmmusic-max/shapleymcg/blob/main/LICENSE
 tags:
   - shapleymcg
 base_model: [base model, if applicable]
