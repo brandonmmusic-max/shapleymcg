@@ -84,6 +84,16 @@ def _save_npy(path: Path, value: np.ndarray) -> str:
     return sha256_file(path)
 
 
+def _save_logits(path: Path, value: np.ndarray, metadata: dict[str, str]) -> str:
+    from safetensors.numpy import save_file
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        raise FileExistsError(f"refusing to overwrite student logits: {path}")
+    save_file({"logits": np.ascontiguousarray(value, dtype=np.float32)}, path, metadata=metadata)
+    return sha256_file(path)
+
+
 def _teacher(path: Path) -> np.ndarray:
     from safetensors import safe_open
 
@@ -248,6 +258,9 @@ def _evaluate_rows(
     token_ids: np.ndarray,
     teacher_paths: list[Path],
     rows: list[int],
+    *,
+    logit_root: Path,
+    arm: str,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
     values = []
     records = []
@@ -255,11 +268,17 @@ def _evaluate_rows(
         started = time.monotonic()
         teacher = _teacher(teacher_paths[row])
         student = _capture(model, token_ids[row])
+        student_sha = _save_logits(
+            logit_root / f"row-{row:02d}.safetensors",
+            student,
+            {"arm": arm, "row": str(row)},
+        )
         token = _token_kld(teacher, student)
         values.append(token)
         records.append({
             "row": row,
             "teacher_sha256": sha256_file(teacher_paths[row]),
+            "student_logits_sha256": student_sha,
             "mean_kld": float(token.mean()),
             "top1_agreement": float(np.mean(
                 np.argmax(teacher, axis=-1) == np.argmax(student, axis=-1)
@@ -361,6 +380,11 @@ def main() -> int:
     )
     selection_teacher = _teacher(teacher_paths[args.selection_row])
     baseline_student = _capture(model, token_ids[args.selection_row])
+    baseline_student_sha = _save_logits(
+        output / "selection-baseline-student-logits" / f"row-{args.selection_row:02d}.safetensors",
+        baseline_student,
+        {"arm": "selection-baseline", "row": str(args.selection_row)},
+    )
     baseline_token = _token_kld(selection_teacher, baseline_student)
     baseline_mean = float(baseline_token.mean())
     _save_npy(output / "selection-baseline.token-kld.npy", baseline_token)
@@ -400,6 +424,12 @@ def main() -> int:
             "single_swap_interval_below_zero": bool(interval[1] < 0.0),
             "candidate_file_sha256": inventory_row["candidate_sha256"],
             "installed_layer_sha256": install["installed_layer_sha256"],
+            "token_kld_sha256": _save_npy(
+                output / "single-layer-token-kld" / f"layer-{layer:03d}.npy", token
+            ),
+            "token_delta_sha256": _save_npy(
+                output / "single-layer-token-delta" / f"layer-{layer:03d}.npy", delta
+            ),
             "elapsed_seconds": time.monotonic() - started,
         }
         layer_rows.append(row)
@@ -458,9 +488,23 @@ def main() -> int:
         print(json.dumps({"stage": "greedy-factory-selection", **greedy}, sort_keys=True), flush=True)
 
     selection_union_sha = _save_npy(output / "selection-union.token-kld.npy", current_token)
+    selection_union_student = _capture(model, token_ids[args.selection_row])
+    selection_union_check = _token_kld(selection_teacher, selection_union_student)
+    if not np.array_equal(selection_union_check, current_token):
+        raise ValueError("selection-union recapture differs from the accepted greedy state")
+    selection_union_student_sha = _save_logits(
+        output / "selection-union-student-logits" / f"row-{args.selection_row:02d}.safetensors",
+        selection_union_student,
+        {"arm": "selection-union", "row": str(args.selection_row)},
+    )
     validation_rows = plan["validation_rows"]
     union_validation, union_validation_records = _evaluate_rows(
-        model, token_ids, teacher_paths, validation_rows
+        model,
+        token_ids,
+        teacher_paths,
+        validation_rows,
+        logit_root=output / "validation-union-student-logits",
+        arm="validation-union",
     )
     if selected_layers:
         # Rebuild the exact Turbo baseline rather than trusting retained CPU
@@ -475,7 +519,12 @@ def main() -> int:
             args.exllamav3_root.resolve(),
         )
         baseline_validation, baseline_validation_records = _evaluate_rows(
-            model, token_ids, teacher_paths, validation_rows
+            model,
+            token_ids,
+            teacher_paths,
+            validation_rows,
+            logit_root=output / "validation-baseline-student-logits",
+            arm="validation-baseline",
         )
     else:
         baseline_validation = union_validation.copy()
@@ -526,10 +575,12 @@ def main() -> int:
         "selection": {
             "row": args.selection_row,
             "baseline_mean_kld": baseline_mean,
+            "baseline_student_logits_sha256": baseline_student_sha,
             "union_mean_kld": current_mean,
             "absolute_reduction": baseline_mean - current_mean,
             "relative_reduction": (baseline_mean - current_mean) / baseline_mean,
             "union_token_kld_sha256": selection_union_sha,
+            "union_student_logits_sha256": selection_union_student_sha,
             "single_layer_swaps": layer_rows,
             "greedy_path": greedy_rows,
         },

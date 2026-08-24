@@ -58,6 +58,17 @@ bytes; it is not a claim about a native TurboDerp 3.5 checkpoint, which was not
 published. The sealed comparison is under
 [`results/qwen3-30b-a3b-posttrained/turboderp-v001-allocation-proof`](results/qwen3-30b-a3b-posttrained/turboderp-v001-allocation-proof/comparison.json).
 
+Candidate production is now being isolated from allocation. The controlled
+factory-union protocol freezes the full causal bit allocation and tests
+same-bit whole-layer reconstructions from the published TurboDerp pool and the
+existing R10/MCG pool on a selection row, followed by nine untouched validation
+rows. A separate progressive-state arm captures calibration activations from a
+sealed causal reconstruction while continuing to encode immutable BF16 source
+weights. The executable protocol and the planned matrix-level multi-factory
+ledger are documented in
+[candidate-factory selection](docs/CANDIDATE_FACTORY_SELECTION.md). No result
+claim is made until the untouched validation endpoint is sealed.
+
 ## Base-model causal allocation result
 
 The full two-level Aumann–Shapley/Fisher arm is now measured. At the identical
