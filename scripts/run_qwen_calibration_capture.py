@@ -25,9 +25,24 @@ def main() -> int:
     parser.add_argument("--attention-backend", default="eager")
     parser.add_argument("--fisher-rank", type=int, default=32)
     parser.add_argument("--seed", type=int, default=20260823)
+    parser.add_argument(
+        "--purposes",
+        default="fit,heldout,conditional_down",
+        help="comma-separated role workers to run; permits one independent process per GPU",
+    )
+    parser.add_argument("--writer-workers", type=int, default=8)
+    parser.add_argument("--max-inflight-chunks", type=int, default=96)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     root = args.output_dir.resolve()
+    capture_specs = {
+        "fit": {"role": "fit", "fisher_rank": 0},
+        "heldout": {"role": "selection", "fisher_rank": args.fisher_rank},
+        "conditional_down": {"role": "confirmation", "fisher_rank": 0},
+    }
+    purposes = tuple(item.strip() for item in args.purposes.split(",") if item.strip())
+    if not purposes or len(set(purposes)) != len(purposes) or any(item not in capture_specs for item in purposes):
+        parser.error("--purposes must select unique values from fit,heldout,conditional_down")
     plan = {
         "schema": "quant-pipeline.qwen-calibration-capture-plan.v1",
         "source_checkpoint": str(args.source_checkpoint.resolve()),
@@ -35,14 +50,12 @@ def main() -> int:
         "output_dir": str(root),
         "model_revision": args.model_revision,
         "layers": list(range(48)),
-        "captures": {
-            "fit": {"role": "fit", "fisher_rank": 0},
-            "heldout": {"role": "selection", "fisher_rank": args.fisher_rank},
-            "conditional_down": {"role": "confirmation", "fisher_rank": 0},
-        },
+        "captures": {purpose: capture_specs[purpose] for purpose in purposes},
         "predecessor_state_hash": ZERO_HASH,
         "device_map": args.device_map,
         "attention_backend": args.attention_backend,
+        "writer_workers": args.writer_workers,
+        "max_inflight_chunks": args.max_inflight_chunks,
         "seed": args.seed,
         "launcher_sha256": sha256_file(Path(__file__).resolve()),
         "dry_run": not args.execute,
@@ -56,9 +69,11 @@ def main() -> int:
             "role": row["role"],
             "output_dir": str(root / purpose),
             "fisher_rank": row["fisher_rank"],
-            "seed": args.seed + index,
+            # A role's stochastic identity must not change when roles are
+            # scheduled in separate per-GPU processes.
+            "seed": args.seed + ("fit", "heldout", "conditional_down").index(purpose),
         }
-        for index, (purpose, row) in enumerate(plan["captures"].items())
+        for purpose, row in plan["captures"].items()
     ]
     results = capture_roles_from_local_bf16(
         source_checkpoint=args.source_checkpoint,
@@ -70,6 +85,8 @@ def main() -> int:
         device_map=args.device_map,
         attn_implementation=args.attention_backend,
         production_geometry=True,
+        writer_workers=args.writer_workers,
+        max_inflight_chunks=args.max_inflight_chunks,
     )
     body = {
         **{key: value for key, value in plan.items() if key != "dry_run"},
@@ -85,7 +102,7 @@ def main() -> int:
         },
     }
     body["receipt_sha256"] = sha256_bytes(canonical_json(body))
-    write_json(root / "calibration-capture-receipt.json", body)
+    write_json(root / f"calibration-capture-{'-'.join(purposes)}-receipt.json", body)
     print(json.dumps({"ok": True, **body}, sort_keys=True))
     return 0
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -104,6 +105,60 @@ def _chunk_receipt(path: Path, *, metadata: Mapping[str, Any], tensors: Mapping[
 
 def _receipt_path(path: Path) -> Path:
     return path.with_suffix(path.suffix + ".receipt.json")
+
+
+def _persist_capture_chunk(
+    path: Path,
+    tensors: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+    window: "CaptureWindow",
+    window_index: int,
+) -> dict[str, Any]:
+    """Seal one CPU-resident chunk outside the GPU producer's hot path."""
+
+    _atomic_save_tensors(path, tensors, metadata)
+    receipt = _chunk_receipt(path, metadata=metadata, tensors=tensors)
+    write_json(_receipt_path(path), receipt)
+    # Full immediate readback remains mandatory, but callers may run it in a
+    # background writer pool while the next model forward is executing.
+    verify_capture_chunk(path, metadata)
+    return {
+        "file": path.relative_to(path.parents[1]).as_posix(),
+        "receipt": _receipt_path(path).relative_to(path.parents[1]).as_posix(),
+        "bytes": receipt["bytes"],
+        "sha256": receipt["sha256"],
+        "window_index": window_index,
+        "token_sha256": window.token_sha256,
+    }
+
+
+def _verify_existing_capture_chunk(
+    path: Path,
+    metadata: Mapping[str, Any],
+    window: "CaptureWindow",
+    window_index: int,
+) -> dict[str, Any]:
+    """Audit a resumable chunk in the same bounded I/O pool as new writes."""
+
+    receipt = verify_capture_chunk(path, metadata)
+    return {
+        "file": path.relative_to(path.parents[1]).as_posix(),
+        "receipt": _receipt_path(path).relative_to(path.parents[1]).as_posix(),
+        "bytes": receipt["bytes"],
+        "sha256": receipt["sha256"],
+        "window_index": window_index,
+        "token_sha256": window.token_sha256,
+    }
+
+
+def _cleanup_fisher_scratch_after(futures: Sequence[Future[dict[str, Any]]], scratch: Path) -> None:
+    """Keep file-backed Fisher tensors alive until every consumer seals."""
+
+    for future in futures:
+        future.result()
+    for temporary in scratch.iterdir():
+        temporary.unlink()
+    scratch.rmdir()
 
 
 def _capture_request_identity(
@@ -459,6 +514,8 @@ def capture_loaded_qwen(
     production_geometry: bool = False,
     model_revision: str | None = None,
     replay_report: Mapping[str, Any] | None = None,
+    writer_workers: int = 1,
+    max_inflight_chunks: int | None = None,
 ) -> dict[str, Any]:
     """Capture a loaded Qwen model with exact routing and crash-safe resume."""
 
@@ -518,80 +575,106 @@ def capture_loaded_qwen(
     for layer in target_layers:
         handles.append(blocks[layer].gate.register_forward_hook(hook(layer)))
     records: dict[str, list[dict[str, Any]]] = {str(layer): [] for layer in target_layers}
+    writer_workers = int(writer_workers)
+    if writer_workers < 1:
+        raise ValueError("writer_workers must be positive")
+    if max_inflight_chunks is None:
+        max_inflight_chunks = max(writer_workers * 12, len(target_layers) * 2)
+    max_inflight_chunks = int(max_inflight_chunks)
+    if max_inflight_chunks < writer_workers:
+        raise ValueError("max_inflight_chunks must be at least writer_workers")
+    pending_writes: list[tuple[int, Future[dict[str, Any]]]] = []
+    scratch_cleanups: list[Future[None]] = []
+
+    def drain_writes(*, all_pending: bool = False) -> None:
+        target = 0 if all_pending else max_inflight_chunks - 1
+        while len(pending_writes) > target:
+            layer, future = pending_writes.pop(0)
+            records[str(layer)].append(future.result())
+
     try:
-        for window_index, window in enumerate(windows):
-            input_ids = torch.tensor([list(window.token_ids)], dtype=torch.long, device=input_device)
-            pending: list[tuple[int, Path, dict[str, Any]]] = []
-            for layer in target_layers:
-                path = root / f"layer-{layer:03d}" / f"window-{window_index:04d}.safetensors"
-                metadata = {
-                    "schema": CHUNK_SCHEMA,
-                    "role": role,
-                    "layer": layer,
-                    "window_index": window_index,
-                    "token_sha256": window.token_sha256,
-                    "document_id": window.document_id,
-                    "start_token": int(window.start_token),
-                    "predecessor_state_hash": predecessor_state_hash,
-                    "capture_request_sha256": request_identity["request_sha256"],
-                }
-                pair = (path.exists(), _receipt_path(path).exists())
-                if pair[0] != pair[1]:
-                    _quarantine_incomplete_chunk(path, root)
-                elif pair == (True, True):
-                    verify_capture_chunk(path, metadata)
-                    records[str(layer)].append(_record(path, window, window_index))
-                    continue
-                pending.append((layer, path, metadata))
-            if pending:
-                captures.clear()
-                with torch.inference_mode():
-                    model(input_ids=input_ids, use_cache=False, return_dict=True)
-            base_captures = {layer: dict(row) for layer, row in captures.items()}
-            fisher_records: dict[int, tuple[Path, tuple[int, ...]]] = {}
-            scratch = root / f".fisher-scratch-{window_index:04d}"
-            if pending and fisher_rank:
+        with ThreadPoolExecutor(max_workers=writer_workers, thread_name_prefix="qwen-capture-writer") as writers:
+            for window_index, window in enumerate(windows):
+                # Bound host memory while allowing one or more prior windows to
+                # serialize concurrently with this window's GPU work.
+                drain_writes()
+                input_ids = torch.tensor([list(window.token_ids)], dtype=torch.long, device=input_device)
+                pending: list[tuple[int, Path, dict[str, Any]]] = []
+                for layer in target_layers:
+                    path = root / f"layer-{layer:03d}" / f"window-{window_index:04d}.safetensors"
+                    metadata = {
+                        "schema": CHUNK_SCHEMA,
+                        "role": role,
+                        "layer": layer,
+                        "window_index": window_index,
+                        "token_sha256": window.token_sha256,
+                        "document_id": window.document_id,
+                        "start_token": int(window.start_token),
+                        "predecessor_state_hash": predecessor_state_hash,
+                        "capture_request_sha256": request_identity["request_sha256"],
+                    }
+                    pair = (path.exists(), _receipt_path(path).exists())
+                    if pair[0] != pair[1]:
+                        _quarantine_incomplete_chunk(path, root)
+                    elif pair == (True, True):
+                        pending_writes.append((
+                            layer,
+                            writers.submit(_verify_existing_capture_chunk, path, metadata, window, window_index),
+                        ))
+                        drain_writes()
+                        continue
+                    pending.append((layer, path, metadata))
+                if pending:
+                    captures.clear()
+                    with torch.inference_mode():
+                        model(input_ids=input_ids, use_cache=False, return_dict=True)
+                base_captures = {layer: dict(row) for layer, row in captures.items()}
+                fisher_records: dict[int, tuple[Path, tuple[int, ...]]] = {}
+                scratch = root / f".fisher-scratch-{window_index:04d}"
+                if pending and fisher_rank:
+                    if scratch.exists():
+                        for stale in scratch.iterdir():
+                            stale.unlink()
+                    fisher_records = _capture_fisher_all(
+                        model,
+                        {layer: blocks[layer] for layer, _path, _metadata in pending},
+                        input_ids,
+                        fisher_rank,
+                        seed + window_index,
+                        scratch,
+                    )
+                window_writes: list[Future[dict[str, Any]]] = []
+                for layer, path, metadata in pending:
+                    if layer not in base_captures:
+                        raise RuntimeError(f"router hook did not fire for layer {layer}")
+                    row = base_captures[layer]
+                    recomputed = recompute_routing(row["gate_weight"], row["hidden"], geometry["top_k"], norm_topk_prob)
+                    if not torch.equal(recomputed[0], row["logits"]):
+                        raise RuntimeError(f"router logits diverged from Qwen arithmetic at layer {layer}")
+                    if not torch.equal(recomputed[1], row["weights"]) or not torch.equal(recomputed[2], row["indices"]):
+                        raise RuntimeError(f"top-k routing diverged from Qwen arithmetic at layer {layer}")
+                    routed = routed_expert_rows(row["hidden"], row["indices"], row["weights"], blocks[layer].experts)
+                    tensors = {
+                        "hidden_states": row["hidden"].to(torch.bfloat16).cpu(),
+                        "router_logits": row["logits"].to(torch.float32).cpu(),
+                        "expert_ids": row["indices"].to(torch.int32).cpu(),
+                        "router_weights": row["weights"].to(torch.float32).cpu(),
+                        **{
+                            key: value.to(torch.float32 if "weight" in key else torch.int32 if "ids" in key or "offsets" in key else torch.bfloat16).cpu()
+                            for key, value in routed.items()
+                        },
+                    }
+                    if fisher_rank:
+                        tensors["fisher_gradients"] = _load_fisher_memmap(fisher_records[layer])
+                    future = writers.submit(_persist_capture_chunk, path, tensors, metadata, window, window_index)
+                    pending_writes.append((layer, future))
+                    window_writes.append(future)
+                    drain_writes()
                 if scratch.exists():
-                    for stale in scratch.iterdir():
-                        stale.unlink()
-                fisher_records = _capture_fisher_all(
-                    model,
-                    {layer: blocks[layer] for layer, _path, _metadata in pending},
-                    input_ids,
-                    fisher_rank,
-                    seed + window_index,
-                    scratch,
-                )
-            for layer, path, metadata in pending:
-                if layer not in base_captures:
-                    raise RuntimeError(f"router hook did not fire for layer {layer}")
-                row = base_captures[layer]
-                recomputed = recompute_routing(row["gate_weight"], row["hidden"], geometry["top_k"], norm_topk_prob)
-                if not torch.equal(recomputed[0], row["logits"]):
-                    raise RuntimeError(f"router logits diverged from Qwen arithmetic at layer {layer}")
-                if not torch.equal(recomputed[1], row["weights"]) or not torch.equal(recomputed[2], row["indices"]):
-                    raise RuntimeError(f"top-k routing diverged from Qwen arithmetic at layer {layer}")
-                routed = routed_expert_rows(row["hidden"], row["indices"], row["weights"], blocks[layer].experts)
-                tensors = {
-                    "hidden_states": row["hidden"].to(torch.bfloat16).cpu(),
-                    "router_logits": row["logits"].to(torch.float32).cpu(),
-                    "expert_ids": row["indices"].to(torch.int32).cpu(),
-                    "router_weights": row["weights"].to(torch.float32).cpu(),
-                    **{
-                        key: value.to(torch.float32 if "weight" in key else torch.int32 if "ids" in key or "offsets" in key else torch.bfloat16).cpu()
-                        for key, value in routed.items()
-                    },
-                }
-                if fisher_rank:
-                    tensors["fisher_gradients"] = _load_fisher_memmap(fisher_records[layer])
-                _atomic_save_tensors(path, tensors, metadata)
-                write_json(_receipt_path(path), _chunk_receipt(path, metadata=metadata, tensors=tensors))
-                verify_capture_chunk(path, metadata)
-                records[str(layer)].append(_record(path, window, window_index))
-            if scratch.exists():
-                for temporary in scratch.iterdir():
-                    temporary.unlink()
-                scratch.rmdir()
+                    scratch_cleanups.append(writers.submit(_cleanup_fisher_scratch_after, tuple(window_writes), scratch))
+            drain_writes(all_pending=True)
+            for cleanup in scratch_cleanups:
+                cleanup.result()
     finally:
         for handle in handles:
             handle.remove()
@@ -686,6 +769,8 @@ def capture_moe_from_local_bf16(
     fisher_rank: int = 0,
     seed: int = 20260823,
     production_geometry: bool = True,
+    writer_workers: int = 1,
+    max_inflight_chunks: int | None = None,
 ) -> dict[str, Any]:
     """Single-role compatibility wrapper over the one-load multi-role path."""
 
@@ -706,6 +791,8 @@ def capture_moe_from_local_bf16(
         installed_layer_prefix=installed_layer_prefix,
         device_map=device_map,
         production_geometry=production_geometry,
+        writer_workers=writer_workers,
+        max_inflight_chunks=max_inflight_chunks,
     )["capture"]
 
 
@@ -722,6 +809,8 @@ def capture_roles_from_local_bf16(
     device_map: Any = "auto",
     attn_implementation: str = "eager",
     production_geometry: bool = True,
+    writer_workers: int = 1,
+    max_inflight_chunks: int | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Load/replay one immutable model and capture all disjoint corpus roles."""
 
@@ -781,5 +870,7 @@ def capture_roles_from_local_bf16(
             production_geometry=production_geometry,
             model_revision=model_revision,
             replay_report=replay,
+            writer_workers=writer_workers,
+            max_inflight_chunks=max_inflight_chunks,
         )
     return result
