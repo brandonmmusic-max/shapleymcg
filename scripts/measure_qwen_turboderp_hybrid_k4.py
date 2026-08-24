@@ -251,6 +251,7 @@ def _score(
     root: Path,
     arm: str,
     workers: int,
+    schema: str = "quant-pipeline.qwen-posttrained-k4-arm.v1",
 ) -> dict:
     payloads = [
         (index, str(teacher), str(student))
@@ -271,7 +272,7 @@ def _score(
     token_path = root / arm / "token-kld.npy"
     atomic_write(token_path, buffer.getvalue())
     report = {
-        "schema": "quant-pipeline.qwen-posttrained-k4-arm.v1",
+        "schema": schema,
         "arm": arm,
         "metric": "float32 mean tokenwise KL(posttrained BF16 || reconstructed student)",
         "summary": summarize(matrix.reshape(-1)),

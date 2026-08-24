@@ -92,6 +92,38 @@ def test_hybrid_k4_plan_is_nonmutating_and_names_three_arms(tmp_path):
     assert not output.exists()
 
 
+def test_exact_turboderp_3p5_plan_is_matched_and_nonmutating(tmp_path):
+    output = tmp_path / "exact-3p5"
+    result = run(
+        "measure_qwen_turboderp_exact_3p5.py",
+        "--source-model",
+        str(tmp_path / "source"),
+        "--encode-root",
+        str(tmp_path / "encode"),
+        "--allocation",
+        str(tmp_path / "allocation.json"),
+        "--panel-root",
+        str(tmp_path / "panel"),
+        "--turboderp-k3-model",
+        str(tmp_path / "turbo-k3"),
+        "--turboderp-k3-revision",
+        "1" * 40,
+        "--turboderp-k4-model",
+        str(tmp_path / "turbo-k4"),
+        "--exllamav3-root",
+        str(tmp_path / "exllamav3"),
+        "--output",
+        str(output),
+    )
+    plan = json.loads(result.stdout)
+    assert plan["expert_rate"] == "exact half K3 / half K4 = 3.5 logical BPW"
+    assert plan["arms"] == [
+        "turboderp-selected-k34",
+        "hybrid-ours-selected-k34",
+    ]
+    assert not output.exists()
+
+
 def test_hybrid_k4_resume_adopts_only_fully_sealed_arm(tmp_path):
     sys.path.insert(0, str(ROOT / "scripts"))
     try:
