@@ -82,6 +82,15 @@ def main() -> int:
     parser.add_argument("--token-file", type=Path, required=True)
     parser.add_argument("--path-in-repo", default="controls/fixed-hadamard-k34-v1")
     parser.add_argument("--receipt", type=Path, required=True)
+    parser.add_argument(
+        "--receipt-path-in-repo",
+        default="receipts/control-fixed-hadamard-k34-v1.json",
+    )
+    parser.add_argument(
+        "--receipt-schema",
+        default="quant-pipeline.qwen-control-hf-publication.v1",
+    )
+    parser.add_argument("--label", default="Qwen fixed-Hadamard K3/K4 control")
     args = parser.parse_args()
 
     bundle = args.bundle.resolve()
@@ -97,14 +106,14 @@ def main() -> int:
         repo_type="dataset",
         folder_path=bundle,
         path_in_repo=args.path_in_repo,
-        commit_message="Publish sealed Qwen fixed-Hadamard K3/K4 control",
+        commit_message=f"Publish sealed {args.label}",
     )
     card_commit = api.upload_file(
         repo_id=args.repo_id,
         repo_type="dataset",
         path_or_fileobj=str(bundle / "README.md"),
         path_in_repo="README.md",
-        commit_message="Publish Qwen control dataset card",
+        commit_message=f"Publish {args.label} dataset card",
     )
     revision = str(card_commit.oid)
     remote = _remote_files(api, args.repo_id, revision, args.path_in_repo)
@@ -146,7 +155,7 @@ def main() -> int:
         sha256_file(bundle / "README.md"),
     )
     receipt = {
-        "schema": "quant-pipeline.qwen-control-hf-publication.v1",
+        "schema": args.receipt_schema,
         "repo_id": args.repo_id,
         "repo_type": "dataset",
         "path_in_repo": args.path_in_repo,
@@ -167,8 +176,8 @@ def main() -> int:
         repo_id=args.repo_id,
         repo_type="dataset",
         path_or_fileobj=str(args.receipt),
-        path_in_repo="receipts/control-fixed-hadamard-k34-v1.json",
-        commit_message="Record verified Qwen control publication",
+        path_in_repo=args.receipt_path_in_repo,
+        commit_message=f"Record verified {args.label} publication",
     )
     print(
         json.dumps(
