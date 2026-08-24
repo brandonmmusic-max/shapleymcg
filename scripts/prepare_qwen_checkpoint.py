@@ -34,7 +34,19 @@ def digest(path: Path) -> str:
 
 
 def canonical_json(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    # Match quant_pipeline.core.artifacts.canonical_json.  Source receipts are
+    # consumed by the fitter, encoder, and evaluators, all of which include the
+    # canonical trailing newline in their identity hash.
+    return (
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode()
 
 
 def verify_checkpoint(
@@ -118,7 +130,7 @@ def main() -> int:
     )
     sealed = verify_checkpoint(destination, args.repository, args.revision)
     receipt.parent.mkdir(parents=True, exist_ok=True)
-    receipt.write_bytes(canonical_json(sealed) + b"\n")
+    receipt.write_bytes(canonical_json(sealed))
     print(json.dumps({"ok": True, "receipt": str(receipt), **sealed}, sort_keys=True))
     return 0
 

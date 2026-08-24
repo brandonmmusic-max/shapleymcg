@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import subprocess
 import sys
@@ -44,6 +45,18 @@ def test_qwen_checkpoint_receipt_hashes_required_files(tmp_path):
     assert receipt["index_sha256"] == receipt["files"]["model.safetensors.index.json"]["sha256"]
     assert len(receipt["files"]) == len(module.REQUIRED_FILES)
     assert len(receipt["receipt_sha256"]) == 64
+    body = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
+    canonical = (
+        json.dumps(
+            body,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode()
+    assert receipt["receipt_sha256"] == hashlib.sha256(canonical).hexdigest()
 
 
 def test_qwen_checkpoint_preparer_refuses_existing_destination(tmp_path):
