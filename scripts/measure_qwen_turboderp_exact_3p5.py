@@ -90,7 +90,7 @@ def _install_turbo_selected_k3(
         config.stc.begin_deferred_load()
         qblock.load(torch.device("cuda:0"))
         config.stc.end_deferred_load()
-        target = blocks[layer]
+        target = blocks[layer].experts
         gate_rows = target.gate_up_proj.shape[1] // 2
         for expert in range(128):
             prefix = f"model.layers.{layer}.mlp.experts.{expert}"
