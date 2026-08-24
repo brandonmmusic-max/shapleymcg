@@ -177,7 +177,7 @@ def main() -> int:
     parser.add_argument("--teacher", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--device-map", default="balanced")
-    parser.add_argument("--attention-backend", default="eager")
+    parser.add_argument("--attention-backend", default="sdpa")
     parser.add_argument("--reanchor-every-layers", type=int, default=4)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()

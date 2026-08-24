@@ -458,12 +458,15 @@ def measure_native_causal_attribution(
                     )
         return float(loss.detach().cpu())
 
+    source_kld = run(0.0, None, False)
+    if abs(source_kld) > 1e-12:
+        raise RuntimeError(
+            "alpha-zero source control does not reproduce zero teacher KL: "
+            f"observed={source_kld:.17g}"
+        )
     for node_index, node in enumerate(nodes):
         run(float(node), node_index, True)
-    source_kld = run(0.0, None, False)
     candidate_kld = run(1.0, None, False)
-    if abs(source_kld) > 1e-12:
-        raise RuntimeError("alpha-zero source control does not reproduce zero teacher KL")
     if candidate_kld < -1e-12:
         raise RuntimeError("alpha-one decoded candidate produced a materially negative KL")
     layer_deltas = np.ones((len(layers), 1), dtype=np.float64)

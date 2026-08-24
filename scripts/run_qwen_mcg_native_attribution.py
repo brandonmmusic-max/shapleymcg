@@ -277,7 +277,7 @@ def main() -> int:
     parser.add_argument("--teacher", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--device-map", default="balanced")
-    parser.add_argument("--attention-backend", default="eager")
+    parser.add_argument("--attention-backend", default="sdpa")
     parser.add_argument("--path-nodes", type=int, default=5)
     parser.add_argument("--fisher-rank", type=int, default=8)
     parser.add_argument("--seed", type=int, default=20260823)
