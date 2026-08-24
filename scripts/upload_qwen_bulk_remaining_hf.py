@@ -116,18 +116,40 @@ def _verify_file(item, path: Path, expected_bytes: int, expected_sha256: str) ->
         raise ValueError(f"Hub Git-blob hash mismatch for {item.path}")
 
 
-def _batch_is_remote(remote: dict, plural: str, batch: list[dict]) -> bool:
+def _verify_remote_layer(
+    api: HfApi,
+    repo_id: str,
+    revision: str,
+    plural: str,
+    layer_row: dict,
+) -> None:
+    root = layer_row["root"]
+    remote = _remote_files(
+        api,
+        repo_id,
+        revision,
+        f"{plural}/{root.name}",
+    )
+    for row in layer_row["upload_rows"]:
+        name = f"{plural}/{root.name}/{row['path']}"
+        _verify_file(
+            remote.get(name),
+            root / row["path"],
+            int(row["bytes"]),
+            row["sha256"],
+        )
+
+
+def _batch_is_remote(
+    api: HfApi,
+    repo_id: str,
+    revision: str,
+    plural: str,
+    batch: list[dict],
+) -> bool:
     try:
         for layer_row in batch:
-            root = layer_row["root"]
-            for row in layer_row["upload_rows"]:
-                name = f"{plural}/{root.name}/{row['path']}"
-                _verify_file(
-                    remote.get(name),
-                    root / row["path"],
-                    int(row["bytes"]),
-                    row["sha256"],
-                )
+            _verify_remote_layer(api, repo_id, revision, plural, layer_row)
     except (ValueError, FileNotFoundError):
         return False
     return True
@@ -245,7 +267,6 @@ def main() -> int:
     data_revisions = []
     operation_count = 0
     existing_revision = str(api.dataset_info(args.repo_id).sha)
-    existing_remote = _remote_files(api, args.repo_id, existing_revision, plural)
     for start in range(0, len(layers), args.batch_layers):
         batch = layers[start : start + args.batch_layers]
         operations = [
@@ -254,10 +275,15 @@ def main() -> int:
             for operation in layer_row["upload_operations"]
         ]
         operation_count += len(operations)
-        already_remote = _batch_is_remote(existing_remote, plural, batch)
+        already_remote = _batch_is_remote(
+            api,
+            args.repo_id,
+            existing_revision,
+            plural,
+            batch,
+        )
         if already_remote:
             revision = existing_revision
-            remote = existing_remote
         else:
             commit = _commit_with_rate_retry(
                 api,
@@ -270,7 +296,6 @@ def main() -> int:
                 retry_minutes=args.retry_minutes,
             )
             revision = str(commit.oid)
-            remote = _remote_files(api, args.repo_id, revision, plural)
         data_revisions.append(
             {
                 "layers": [row["layer"] for row in batch],
@@ -280,14 +305,7 @@ def main() -> int:
         )
         for layer_row in batch:
             root = layer_row["root"]
-            for row in layer_row["upload_rows"]:
-                name = f"{plural}/{root.name}/{row['path']}"
-                _verify_file(
-                    remote.get(name),
-                    root / row["path"],
-                    int(row["bytes"]),
-                    row["sha256"],
-                )
+            _verify_remote_layer(api, args.repo_id, revision, plural, layer_row)
             layer = int(layer_row["layer"])
             manifest = layer_row["manifest"]
             receipt = {
