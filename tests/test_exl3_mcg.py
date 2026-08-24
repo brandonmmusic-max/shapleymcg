@@ -1,4 +1,5 @@
 import sys
+import shutil
 
 import pytest
 
@@ -55,6 +56,9 @@ def test_fake_pinned_interface_seal_and_geometry(tmp_path):
         assert tuple(result) == (3, 4, 5)
         assert result[3].reconstructed.shape == weight.shape
         assert result[3].stored_bytes == 3 + 2 * 128 * 4
+        assert result[3].metadata["codec_identity"]["sigma_reg"] == 0.025
+        assert result[3].metadata["codec_identity"]["backend_class"] == "r7_encoder.r10_codec.R10TrellisCodec"
+        assert set(result[3].metadata["codec_identity"]["environment"]) == {"python", "machine", "torch", "torch_cuda", "compute_capability"}
         with pytest.raises(ValueError, match="divisible by 128"):
             codec._parse_unit("bad", (127, 128))
         (tmp_path / "r7_encoder" / "constants.py").write_text("DRIFT = True\n")
@@ -66,3 +70,25 @@ def test_fake_pinned_interface_seal_and_geometry(tmp_path):
                 sys.modules.pop(name)
         while str(tmp_path) in sys.path:
             sys.path.remove(str(tmp_path))
+
+
+def test_numeric_identity_binds_sigma_and_code_but_not_mount_path(tmp_path):
+    one = tmp_path / "one"
+    two = tmp_path / "two"
+    one.mkdir()
+    numeric_one, extension_one = _fake_codec_tree(one)
+    shutil.copytree(one / "r7_encoder", two / "r7_encoder")
+    two.mkdir(exist_ok=True)
+    numeric_two = two / "numeric.py"
+    extension_two = two / "extension.so"
+    shutil.copy2(numeric_one, numeric_two)
+    shutil.copy2(extension_one, extension_two)
+    first = Exl3MCGCodec(source_root=one, numeric_core=numeric_one, extension=extension_one, device="cpu")
+    remounted = Exl3MCGCodec(source_root=two, numeric_core=numeric_two, extension=extension_two, device="cpu")
+    assert first.identity == remounted.identity
+    changed_sigma = Exl3MCGCodec(
+        source_root=two, numeric_core=numeric_two, extension=extension_two, device="cuda:0", sigma_reg=0.05
+    )
+    assert changed_sigma.identity != first.identity
+    with pytest.raises(ValueError, match="sigma_reg"):
+        Exl3MCGCodec(source_root=one, numeric_core=numeric_one, extension=extension_one, sigma_reg=float("inf"))

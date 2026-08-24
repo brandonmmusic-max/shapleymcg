@@ -1,0 +1,32 @@
+{
+  "schema": "quant-pipeline.numeric-environment-lock.v1",
+  "platform": "linux-x86_64",
+  "python": "3.12.3",
+  "cuda_toolkit": "13.2",
+  "nvidia_driver": "__REQUIRED_B200_HOST_NVIDIA_DRIVER_VERSION__",
+  "compute_capability": "10.0",
+  "packages": {
+    "torch": "2.12.1+cu132",
+    "transformers": "5.12.1",
+    "safetensors": "0.7.0",
+    "datasets": "4.7.0",
+    "numpy": "1.26.4",
+    "huggingface-hub": "1.20.1",
+    "accelerate": "1.14.0",
+    "sentencepiece": "0.2.1",
+    "ninja": "1.13.0",
+    "setuptools": "80.10.2",
+    "wheel": "0.46.3"
+  },
+  "wheelhouse_manifest_sha256": "__REQUIRED_OFFLINE_WHEELHOUSE_MANIFEST_SHA256__",
+  "required_environment": {
+    "PYTHONHASHSEED": "0",
+    "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
+    "TORCH_CUDA_ARCH_LIST": "10.0",
+    "TOKENIZERS_PARALLELISM": "false"
+  },
+  "required_placeholders": [
+    "nvidia_driver",
+    "wheelhouse_manifest_sha256"
+  ]
+}

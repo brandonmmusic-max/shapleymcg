@@ -84,8 +84,19 @@ def split_layer_damage(
     measured_layer_damage: float,
     projected_expert_residuals: np.ndarray,
     routing_state_shift: float = 0.0,
+    projected_routing_residual: np.ndarray | None = None,
 ) -> dict:
-    direct = quadratic_expert_attribution(projected_expert_residuals)
+    expert = np.asarray(projected_expert_residuals, dtype=np.float64)
+    if projected_routing_residual is not None:
+        routing = np.asarray(projected_routing_residual, dtype=np.float64)
+        if routing.shape != expert.shape[1:]:
+            raise ValueError("projected routing residual must match one expert residual observation shape")
+        joint = np.concatenate([expert, routing[None]], axis=0)
+        shares = quadratic_expert_attribution(joint)
+        direct = shares[:-1]
+        routing_state_shift = float(shares[-1])
+    else:
+        direct = quadratic_expert_attribution(expert)
     raw = np.concatenate([direct, np.asarray([routing_state_shift], dtype=np.float64)])
     accounting = reconcile_explicit_remainder(raw, measured_layer_damage)
     return {
@@ -96,4 +107,3 @@ def split_layer_damage(
         "measured_layer_damage": accounting.measured_total,
         "closed_total": float(np.sum(accounting.reconciled)),
     }
-

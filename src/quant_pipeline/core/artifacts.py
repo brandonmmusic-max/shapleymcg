@@ -37,6 +37,14 @@ def atomic_write(path: str | Path, data: bytes) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, target)
+        # fsyncing the temporary file makes its contents durable, but it does
+        # not make the rename durable.  A power loss can otherwise restore the
+        # old directory entry (or no entry at all) after this function returns.
+        parent_fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
     finally:
         try:
             os.unlink(temporary)
@@ -68,6 +76,11 @@ def prepare_empty_destination(path: str | Path) -> Path:
             raise FileExistsError(f"destination is not empty; inspect and choose a new path: {destination}")
     else:
         destination.mkdir(parents=True)
+        parent_fd = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
     return destination
 
 

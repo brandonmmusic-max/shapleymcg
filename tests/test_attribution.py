@@ -5,6 +5,7 @@ from quant_pipeline.scoring.attribution import (
     conditional_quadratic_damage,
     quadratic_expert_attribution,
     reconcile_explicit_remainder,
+    split_layer_damage,
 )
 
 
@@ -27,6 +28,19 @@ def test_expert_quadratic_attribution_includes_cross_terms():
     assert np.isclose(shares.sum(), 0.5 * np.mean(total**2))
 
 
+def test_routing_residual_is_a_joint_cross_term_participant():
+    split = split_layer_damage(
+        6.0,
+        np.asarray([[1.0], [1.0]]),
+        projected_routing_residual=np.asarray([1.0]),
+    )
+    np.testing.assert_allclose(split["expert_direct"], [1.5, 1.5])
+    assert np.isclose(split["routing_state_shift"], 1.5)
+    assert np.isclose(split["raw_total"], 4.5)
+    assert np.isclose(split["unresolved_nonlinear_remainder"], 1.5)
+    assert np.isclose(split["closed_total"], 6.0)
+
+
 def test_reconciliation_does_not_rescale_raw_values():
     accounting = reconcile_explicit_remainder([0.2, -0.1], 0.5)
     np.testing.assert_array_equal(accounting.raw, [0.2, -0.1])
@@ -40,4 +54,3 @@ def test_conditional_damage_matches_direct_energy_difference():
     predicted = conditional_quadratic_damage(residual, deltas)
     direct = np.asarray([0.5 * np.mean((residual + delta) ** 2 - residual**2) for delta in deltas])
     np.testing.assert_allclose(predicted, direct)
-

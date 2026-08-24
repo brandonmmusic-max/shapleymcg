@@ -1,0 +1,20 @@
+{
+  "schema": "quant-pipeline.campaign-definition.v1",
+  "experiment_spec": "experiment.toml",
+  "inputs": {
+    "source_checkpoint": "__REQUIRED_LOCAL_QWEN_BF16_CHECKPOINT_DIR__",
+    "sealed_corpus": "__REQUIRED_LOCAL_SEALED_CORPUS_JSON__",
+    "kld_window": "__REQUIRED_LOCAL_QWEN_2048_KLD_WINDOW_DIR__",
+    "adapter_config": "adapter-config.json",
+    "artifact_lock": "artifact-lock.json",
+    "environment_lock": "../../environments/b200-cu132.lock.json",
+    "exl3_source_root": "__REQUIRED_LOCAL_CORRECTED_R10_SOURCE_ROOT__",
+    "exl3_numeric_core": "__REQUIRED_LOCAL_ENCODE_TR3_V31_PY__",
+    "exl3_extension": "__REQUIRED_LOCAL_SM100_EXLLAMAV3_EXTENSION_SO__",
+    "b12x_source_root": "__REQUIRED_LOCAL_CLEAN_B12X_CHECKOUT__"
+  },
+  "layers": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47],
+  "reanchor_every_layers": 4,
+  "reanchor_failure_policy": "request_reallocation",
+  "retention_mode": "capture-plus-ledger"
+}

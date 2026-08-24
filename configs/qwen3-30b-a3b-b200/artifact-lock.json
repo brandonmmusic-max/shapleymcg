@@ -1,0 +1,50 @@
+{
+  "schema": "quant-pipeline.qwen-artifact-lock.v1",
+  "model": {
+    "id": "Qwen/Qwen3-30B-A3B-Base",
+    "revision": "1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9",
+    "config_sha256": "__REQUIRED_MODEL_CONFIG_SHA256__",
+    "index_sha256": "__REQUIRED_MODEL_INDEX_SHA256__",
+    "shard_manifest_sha256": "__REQUIRED_MODEL_SHARD_MANIFEST_SHA256__"
+  },
+  "corpus": {
+    "dataset_id": "Salesforce/wikitext",
+    "dataset_revision": "b08601e04326c79dfdd32d625aee71d232d685c3",
+    "tokenizer_revision": "1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9",
+    "calibration_jsonl_sha256": "__REQUIRED_CALIBRATION_JSONL_SHA256__",
+    "sealed_corpus_sha256": "__REQUIRED_SEALED_CORPUS_SHA256__",
+    "kld_window_sha256": "__REQUIRED_QWEN_2048_KLD_WINDOW_SHA256__"
+  },
+  "exl3": {
+    "upstream_release": "v0.0.43",
+    "upstream_repository": "turboderp-org/exllamav3",
+    "upstream_commit": "c5d9c657966ffeeaa9353f0cc899f18629da4a13",
+    "corrected_source_repository": "brandonmusic/GLM-5.2-EXL3-TR3v4-3.5bpw-MTP78",
+    "corrected_source_revision": "7c73450f05a151439d0f184f216b1eefcc394a31",
+    "corrected_source_manifest_sha256": "e224af1d9f80ab99b088f224b8ade678c9e7873498924feecad1b7cacad3dd2f",
+    "source_closure_sha256": "__REQUIRED_CORRECTED_R10_SOURCE_CLOSURE_SHA256__",
+    "numeric_core_sha256": "e9a85a47e165c8d8644354cef611efbb81dfd9ba88544ca59f0c80ee6bc75032",
+    "r10_codec_sha256": "8b31fb8d1214df63fa1557175a926f6d2d680d69d2cb3689d1df4b5c62a1eded",
+    "sm100_extension_sha256": "__REQUIRED_BUILT_SM100_EXTENSION_SHA256__"
+  },
+  "b12x": {
+    "repository": "local-inference-lab/b12x",
+    "commit": "36bce2c1552ba2d47dc09f20a6f64fbfc8ec4ff8",
+    "closure": {
+      "docs/btx-checkpoint-format.md": "62ed1996ba54d4f2ab63ccb14ba9dc7e22e15d4443bec330226696600368aebd",
+      "b12x/moe/_shared/btx_schema.py": "282190602b38c70a2085b40a9a2ef895ba6925c38725671cc99b0204d8d1bbdd",
+      "b12x/moe/_shared/kernels/w4a16/btx.py": "d6b241b59b29265235914e1be955607b3e9b0cd83a40f72a40350455adf927bd",
+      "b12x/moe/_shared/kernels/w4a16/btx_synth.py": "f94b5e50c02551a041660d194266849f656e8a08da179d1e36fa64119d04f54e"
+    }
+  },
+  "required_placeholders": [
+    "model.config_sha256",
+    "model.index_sha256",
+    "model.shard_manifest_sha256",
+    "corpus.calibration_jsonl_sha256",
+    "corpus.sealed_corpus_sha256",
+    "corpus.kld_window_sha256",
+    "exl3.source_closure_sha256",
+    "exl3.sm100_extension_sha256"
+  ]
+}

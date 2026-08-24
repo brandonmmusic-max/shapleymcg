@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import importlib
+import math
+import platform
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from ..core.artifacts import sha256_file
+from ..core.artifacts import canonical_json, sha256_bytes, sha256_file
 from .protocols import CodecCandidate
 
 
@@ -51,20 +53,52 @@ class Exl3MCGCodec:
         if not (self.source_root / "r7_encoder" / "r10_codec.py").is_file():
             raise FileNotFoundError(self.source_root / "r7_encoder" / "r10_codec.py")
         self.device = device
-        self.sigma_reg = sigma_reg
+        if (
+            isinstance(sigma_reg, bool)
+            or not isinstance(sigma_reg, (int, float))
+            or not math.isfinite(float(sigma_reg))
+            or not float(sigma_reg) > 0
+        ):
+            raise ValueError("sigma_reg must be a positive finite number")
+        self.sigma_reg = float(sigma_reg)
         self._codec_instance = None
-        closure_files = ("__init__.py", "r10_codec.py", "trellis.py", "constants.py", "types.py", "determinism.py")
-        closure = {
-            name: sha256_file(self.source_root / "r7_encoder" / name)
-            for name in closure_files
-        }
+        package_root = self.source_root / "r7_encoder"
+        closure_files = sorted(path.relative_to(package_root).as_posix() for path in package_root.rglob("*.py"))
+        if not closure_files:
+            raise FileNotFoundError("corrected codec Python package is empty")
+        closure = {name: sha256_file(package_root / name) for name in closure_files}
+        try:
+            import torch
+
+            torch_version = str(torch.__version__)
+            torch_cuda_version = None if torch.version.cuda is None else str(torch.version.cuda)
+            compute_capability = (
+                list(torch.cuda.get_device_capability(device))
+                if str(device).startswith("cuda") and torch.cuda.is_available()
+                else None
+            )
+        except ImportError:  # pragma: no cover
+            torch_version = None
+            torch_cuda_version = None
+            compute_capability = None
+        # Paths and CUDA ordinal are intentionally excluded: they do not alter
+        # codec numerics and would make identical sealed implementations appear
+        # different after a mount or scheduler change.
         self.identity = {
-            "source_root": str(self.source_root),
+            "identity_schema": "quant-pipeline.exl3-mcg-numeric-identity.v1",
+            "backend_class": "r7_encoder.r10_codec.R10TrellisCodec",
             "python_closure_sha256": closure,
-            "numeric_core": str(self.numeric_core),
             "numeric_core_sha256": sha256_file(self.numeric_core),
-            "extension": str(self.extension),
             "extension_sha256": sha256_file(self.extension),
+            "sigma_reg": self.sigma_reg,
+            "device_type": str(device).split(":", 1)[0],
+            "environment": {
+                "python": platform.python_version(),
+                "machine": platform.machine(),
+                "torch": torch_version,
+                "torch_cuda": torch_cuda_version,
+                "compute_capability": compute_capability,
+            },
         }
 
     def _codec(self):
@@ -125,7 +159,10 @@ class Exl3MCGCodec:
         if any(int(bit) not in (3, 4, 5) for bit in bits):
             raise ValueError("the pinned R10 adapter currently supports K3/K4/K5; K2 requires the declared extension")
         tensor_id = self._parse_unit(unit_id, tuple(weight_hf.shape))
-        metadata = dict(provenance or {}) | {"codec_identity": self.identity}
+        metadata = dict(provenance or {}) | {
+            "codec_identity": self.identity,
+            "codec_identity_sha256": sha256_bytes(canonical_json(self.identity)),
+        }
         encoded = self._codec().encode_bits(
             tensor_id=tensor_id,
             weight_hf=weight_hf,

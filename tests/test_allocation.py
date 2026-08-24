@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from quant_pipeline.allocation.global_dp import Candidate, allocate, pareto_frontier
+from quant_pipeline.allocation.global_dp import Candidate, allocate, allocate_with_fixed_layer_cost, pareto_frontier
 
 
 def test_global_allocator_can_trade_bytes_across_units():
@@ -32,6 +32,16 @@ def test_quantum_never_rounds_individual_candidates():
     assert allocate(candidates, 128, quantum=1).stored_bytes == 128
     with pytest.raises(ValueError, match="divisible"):
         allocate(candidates, 128, quantum=128)
+
+
+def test_fixed_layer_cost_is_charged_before_expert_allocation():
+    candidates = [Candidate("a", "a", 6, 0.0), Candidate("b", "b", 6, 0.0)]
+    result = allocate_with_fixed_layer_cost(candidates, byte_budget=17, fixed_layer_shared_bytes=5)
+    assert result.variable_payload_bytes == 12
+    assert result.fixed_layer_shared_bytes == 5
+    assert result.stored_bytes == 17
+    with pytest.raises(ValueError, match="alone exceeds"):
+        allocate_with_fixed_layer_cost(candidates, byte_budget=4, fixed_layer_shared_bytes=5)
 
 
 @pytest.mark.parametrize(

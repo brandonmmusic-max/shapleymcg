@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use ShapleyMCG, cite this software and the upstream methods listed in docs/REFERENCES.md."
+title: "ShapleyMCG: an auditable calibration-to-encoding pipeline for low-bit MoE models"
+type: software
+authors:
+  - family-names: Music
+    given-names: Brandon M.
+repository-code: "https://github.com/brandonmmusic-max/shapleymcg"
+url: "https://github.com/brandonmmusic-max/shapleymcg"
+version: 0.2.0
+date-released: 2026-08-23
+license-url: "https://github.com/brandonmmusic-max/shapleymcg/blob/main/LICENSE"
+keywords:
+  - quantization
+  - mixture-of-experts
+  - Aumann-Shapley
+  - EXL3
+  - trellis quantization
+  - reproducibility

@@ -9,6 +9,7 @@ import numpy as np
 
 from .allocation.global_dp import Candidate, allocate
 from .calibration.windows import seal_corpus
+from .campaign.runner import CampaignRunner, audit_campaign, create_plan, load_adapter, status_campaign
 from .checkpoint.reference_pack import audit_packed_checkpoint, encode_reference_checkpoint
 from .core.artifacts import require_execute, sha256_file, write_json
 from .models.hf_capture import capture_logits
@@ -136,11 +137,19 @@ def command_attribute_experts(args) -> None:
 
 
 def command_allocate(args) -> None:
+    if not getattr(args, "non_competitive_reference", False):
+        raise ValueError(
+            "raw Candidate JSON is not a validated ledger; pass "
+            "--non-competitive-reference only for explicitly ineligible reference work"
+        )
     raw = json.loads(Path(args.candidates).read_text())
     candidates = [Candidate(**row) for row in raw["candidates"]]
     result = allocate(candidates, args.byte_budget, args.quantum)
     document = {
-        "schema": "quant-pipeline.allocation.v1",
+        "schema": "quant-pipeline.noncompetitive-reference-allocation.v1",
+        "competitive": False,
+        "eligibility": "reference-only-not-admissible-for-production-or-quality-claims",
+        "input_validation": "raw-candidate-json-without-ledger-validation",
         "byte_semantics": "codec-payload-including-codec-vectors-excluding-container",
         "byte_budget": args.byte_budget,
         "stored_bytes": result.stored_bytes,
@@ -169,6 +178,39 @@ def command_audit(args) -> None:
     result = audit_packed_checkpoint(args.packed_dir)
     _print(result)
     if not result["ok"]:
+        raise SystemExit(2)
+
+
+def command_campaign_plan(args) -> None:
+    adapter = load_adapter(args.adapter)
+    plan = create_plan(args.definition, args.campaign_dir, adapter)
+    _print(
+        {
+            "campaign_dir": str(Path(args.campaign_dir).resolve()),
+            "plan_sha256": plan["plan_sha256"],
+            "stage_count": len(plan["stages"]),
+        }
+    )
+
+
+def command_campaign_execute(args) -> None:
+    require_execute(args.execute, f"{args.campaign_mode} the causal quantization campaign")
+    adapter = load_adapter(args.adapter)
+    result = CampaignRunner(args.campaign_dir, adapter).execute(resume=args.campaign_mode == "resume")
+    _print(result)
+
+
+def command_campaign_status(args) -> None:
+    adapter = load_adapter(args.adapter)
+    _print(status_campaign(args.campaign_dir, adapter))
+
+
+def command_campaign_audit(args) -> None:
+    adapter = load_adapter(args.adapter)
+    result = audit_campaign(args.campaign_dir, adapter)
+    printable = {key: value for key, value in result.items() if key != "completed"}
+    _print(printable)
+    if not result["integrity_ok"]:
         raise SystemExit(2)
 
 
@@ -216,11 +258,19 @@ def build_parser() -> argparse.ArgumentParser:
     experts.add_argument("--output", required=True)
     experts.set_defaults(func=command_attribute_experts)
 
-    allocation = sub.add_parser("allocate", help="solve the exact global codec-payload-byte allocation")
+    allocation = sub.add_parser(
+        "allocate",
+        help="solve a noncompetitive reference allocation from unvalidated Candidate JSON",
+    )
     allocation.add_argument("--candidates", required=True)
     allocation.add_argument("--byte-budget", required=True, type=int)
     allocation.add_argument("--quantum", default=1, type=int)
     allocation.add_argument("--output", required=True)
+    allocation.add_argument(
+        "--non-competitive-reference",
+        action="store_true",
+        help="acknowledge that this raw-Candidate output is ineligible for production or quality claims",
+    )
     allocation.set_defaults(func=command_allocate)
 
     encode = sub.add_parser("encode-reference", help="write an auditable reference packed checkpoint")
@@ -235,6 +285,32 @@ def build_parser() -> argparse.ArgumentParser:
     audit = sub.add_parser("audit", help="verify packed checkpoint hashes and byte accounting")
     audit.add_argument("--packed-dir", required=True)
     audit.set_defaults(func=command_audit)
+
+    campaign = sub.add_parser("campaign", help="plan, execute, resume, inspect, or audit a causal campaign")
+    campaign_sub = campaign.add_subparsers(dest="campaign_mode", required=True)
+
+    campaign_plan = campaign_sub.add_parser("plan", help="seal a campaign plan without running model work")
+    campaign_plan.add_argument("--definition", required=True)
+    campaign_plan.add_argument("--campaign-dir", required=True)
+    campaign_plan.add_argument("--adapter", required=True, help="Python StageAdapter as module:attribute")
+    campaign_plan.set_defaults(func=command_campaign_plan)
+
+    for mode in ("execute", "resume"):
+        campaign_run = campaign_sub.add_parser(mode, help=f"{mode} a sealed causal campaign")
+        campaign_run.add_argument("--campaign-dir", required=True)
+        campaign_run.add_argument("--adapter", required=True, help="Python StageAdapter as module:attribute")
+        campaign_run.add_argument("--execute", action="store_true")
+        campaign_run.set_defaults(func=command_campaign_execute)
+
+    campaign_status = campaign_sub.add_parser("status", help="show read-only campaign progress and drift")
+    campaign_status.add_argument("--campaign-dir", required=True)
+    campaign_status.add_argument("--adapter", required=True, help="Python StageAdapter as module:attribute")
+    campaign_status.set_defaults(func=command_campaign_status)
+
+    campaign_audit = campaign_sub.add_parser("audit", help="verify plan, journal, inputs, code, and artifacts")
+    campaign_audit.add_argument("--campaign-dir", required=True)
+    campaign_audit.add_argument("--adapter", required=True, help="Python StageAdapter as module:attribute")
+    campaign_audit.set_defaults(func=command_campaign_audit)
     return parser
 
 

@@ -21,6 +21,15 @@ class Allocation:
     predicted_damage: float
 
 
+@dataclass(frozen=True)
+class AccountedAllocation:
+    choices: tuple[Candidate, ...]
+    variable_payload_bytes: int
+    fixed_layer_shared_bytes: int
+    stored_bytes: int
+    predicted_damage: float
+
+
 def pareto_frontier(candidates: Iterable[Candidate]) -> list[Candidate]:
     ordered = sorted(candidates, key=lambda c: (c.stored_bytes, c.predicted_damage, c.choice_id))
     frontier: list[Candidate] = []
@@ -85,3 +94,32 @@ def allocate(candidates: Iterable[Candidate], byte_budget: int, quantum: int = 1
     used, (damage, selected) = min(states.items(), key=lambda item: (item[1][0], item[0]))
     actual_bytes = sum(choice.stored_bytes for choice in selected)
     return Allocation(selected, actual_bytes, damage)
+
+
+def allocate_with_fixed_layer_cost(
+    candidates: Iterable[Candidate],
+    byte_budget: int,
+    fixed_layer_shared_bytes: int,
+    quantum: int = 1,
+) -> AccountedAllocation:
+    """Allocate expert-private choices after charging sealed layer-fixed bytes."""
+    if (
+        isinstance(fixed_layer_shared_bytes, bool)
+        or not isinstance(fixed_layer_shared_bytes, int)
+        or fixed_layer_shared_bytes < 0
+    ):
+        raise ValueError("fixed layer-shared cost must be a non-negative integer")
+    if fixed_layer_shared_bytes > byte_budget:
+        raise ValueError("fixed layer-shared payload alone exceeds the byte budget")
+    variable_budget = byte_budget - fixed_layer_shared_bytes
+    result = allocate(candidates, variable_budget, quantum)
+    total = result.stored_bytes + fixed_layer_shared_bytes
+    if total > byte_budget:
+        raise RuntimeError("accounted allocator exceeded the total byte budget")
+    return AccountedAllocation(
+        choices=result.choices,
+        variable_payload_bytes=result.stored_bytes,
+        fixed_layer_shared_bytes=fixed_layer_shared_bytes,
+        stored_bytes=total,
+        predicted_damage=result.predicted_damage,
+    )
