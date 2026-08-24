@@ -94,6 +94,60 @@ def _save_logits(path: Path, value: np.ndarray, metadata: dict[str, str]) -> str
     return sha256_file(path)
 
 
+def _load_npy(path: Path, expected_sha256: str) -> np.ndarray:
+    if sha256_file(path) != expected_sha256:
+        raise ValueError(f"saved token artifact hash mismatch: {path}")
+    return np.asarray(np.load(path, allow_pickle=False), dtype=np.float64)
+
+
+def _resume_layer_rows(
+    log_path: Path,
+    output: Path,
+    baseline_token: np.ndarray,
+    inventory: dict[str, Any],
+    *,
+    seed: int,
+) -> list[dict[str, Any]]:
+    rows: dict[int, dict[str, Any]] = {}
+    for raw in log_path.read_text().splitlines():
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if value.get("stage") != "single-layer-swap":
+            continue
+        value = dict(value)
+        value.pop("stage", None)
+        rows[int(value["layer"])] = value
+    if sorted(rows) != list(range(48)):
+        raise ValueError("resume log does not contain 48 completed single-layer swaps")
+    result = []
+    for layer in range(48):
+        row = rows[layer]
+        inventory_row = inventory["layers"][layer]
+        if row["candidate_file_sha256"] != inventory_row["candidate_sha256"]:
+            raise ValueError(f"resume layer {layer} candidate identity differs from inventory")
+        token = _load_npy(
+            output / "single-layer-token-kld" / f"layer-{layer:03d}.npy",
+            row["token_kld_sha256"],
+        )
+        delta = _load_npy(
+            output / "single-layer-token-delta" / f"layer-{layer:03d}.npy",
+            row["token_delta_sha256"],
+        )
+        if not np.array_equal(token - baseline_token, delta):
+            raise ValueError(f"resume layer {layer} token delta does not reproduce")
+        if float(token.mean()) != float(row["mcg_mean_kld"]):
+            raise ValueError(f"resume layer {layer} mean KLD does not reproduce")
+        if float(delta.mean()) != float(row["delta_mean_kld_vs_turbo"]):
+            raise ValueError(f"resume layer {layer} mean delta does not reproduce")
+        interval = _paired_block_interval(delta, seed=seed + layer)
+        if interval != [float(value) for value in row["paired_block_95_interval"]]:
+            raise ValueError(f"resume layer {layer} bootstrap interval does not reproduce")
+        result.append(row)
+    return result
+
+
 def _teacher(path: Path) -> np.ndarray:
     from safetensors import safe_open
 
@@ -304,6 +358,11 @@ def main() -> int:
     parser.add_argument("--attention-backend", default="eager")
     parser.add_argument("--selection-row", type=int, default=0)
     parser.add_argument("--seed", type=int, default=20260824)
+    parser.add_argument(
+        "--resume-log",
+        type=Path,
+        help="resume after all 48 layer swaps using the append-only producer log",
+    )
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     if args.selection_row not in range(10):
@@ -334,8 +393,33 @@ def main() -> int:
     if not args.execute:
         return 0
 
-    output = prepare_empty_destination(args.output.resolve())
-    write_json(output / "plan.json", plan | {"dry_run": False})
+    if args.resume_log is None:
+        output = prepare_empty_destination(args.output.resolve())
+        write_json(output / "plan.json", plan | {"dry_run": False})
+    else:
+        output = args.output.resolve()
+        if not output.is_dir():
+            raise ValueError("resume output does not exist")
+        existing_plan = json.loads((output / "plan.json").read_text())
+        for key in (
+            "allocation_file_sha256",
+            "candidate_inventory_file_sha256",
+            "source_model",
+            "panel_root",
+            "turboderp_k3_model",
+            "turboderp_k3_revision",
+            "turboderp_k4_model",
+            "exllamav3_root",
+            "attention_backend",
+            "selection_row",
+            "validation_rows",
+            "fixed_rate",
+            "factory_granularity",
+            "seed",
+        ):
+            if existing_plan.get(key) != plan.get(key):
+                raise ValueError(f"resume plan differs at {key}")
+        plan = existing_plan
     allocation, choices = _load_allocation(args.allocation.resolve())
     inventory = json.loads(args.candidate_inventory.read_text())
     _verify_seal(inventory, "inventory_sha256", "candidate inventory")
@@ -380,14 +464,29 @@ def main() -> int:
     )
     selection_teacher = _teacher(teacher_paths[args.selection_row])
     baseline_student = _capture(model, token_ids[args.selection_row])
-    baseline_student_sha = _save_logits(
-        output / "selection-baseline-student-logits" / f"row-{args.selection_row:02d}.safetensors",
-        baseline_student,
-        {"arm": "selection-baseline", "row": str(args.selection_row)},
-    )
     baseline_token = _token_kld(selection_teacher, baseline_student)
     baseline_mean = float(baseline_token.mean())
-    _save_npy(output / "selection-baseline.token-kld.npy", baseline_token)
+    baseline_student_path = (
+        output / "selection-baseline-student-logits" / f"row-{args.selection_row:02d}.safetensors"
+    )
+    if args.resume_log is None:
+        baseline_student_sha = _save_logits(
+            baseline_student_path,
+            baseline_student,
+            {"arm": "selection-baseline", "row": str(args.selection_row)},
+        )
+        _save_npy(output / "selection-baseline.token-kld.npy", baseline_token)
+    else:
+        saved_baseline_student = _teacher(baseline_student_path)
+        if not np.array_equal(saved_baseline_student, baseline_student):
+            raise ValueError("resumed Turbo baseline logits differ from the original capture")
+        saved_baseline_token = np.asarray(
+            np.load(output / "selection-baseline.token-kld.npy", allow_pickle=False),
+            dtype=np.float64,
+        )
+        if not np.array_equal(saved_baseline_token, baseline_token):
+            raise ValueError("resumed Turbo baseline token KLD differs from the original capture")
+        baseline_student_sha = sha256_file(baseline_student_path)
     print(json.dumps({
         "stage": "selection-baseline", "mean_kld": baseline_mean,
     }, sort_keys=True), flush=True)
@@ -397,7 +496,8 @@ def main() -> int:
     layer_rows = []
     retained_paths: dict[int, Path] = {}
     receipts: dict[int, dict[str, Any]] = {}
-    for inventory_row in inventory["layers"]:
+    inventory_rows = [] if args.resume_log is not None else inventory["layers"]
+    for inventory_row in inventory_rows:
         layer = int(inventory_row["layer"])
         started = time.monotonic()
         snapshot = _snapshot_layer(model, layer)
@@ -439,10 +539,26 @@ def main() -> int:
             path.unlink()
         print(json.dumps({"stage": "single-layer-swap", **row}, sort_keys=True), flush=True)
 
+    if args.resume_log is not None:
+        layer_rows = _resume_layer_rows(
+            args.resume_log.resolve(),
+            output,
+            baseline_token,
+            inventory,
+            seed=args.seed,
+        )
+        print(json.dumps({
+            "stage": "resume-layer-swaps-verified",
+            "layer_count": len(layer_rows),
+            "baseline_mean_kld": baseline_mean,
+        }, sort_keys=True), flush=True)
+
     selected_layers = []
     greedy_rows = []
     current_token = baseline_token
     current_mean = baseline_mean
+    retained_root = output / "retained-candidates"
+    retained_root.mkdir(parents=True, exist_ok=True)
     ranked = sorted(layer_rows, key=lambda row: (row["delta_mean_kld_vs_turbo"], row["layer"]))
     for candidate in ranked:
         if not candidate["single_swap_improves_mean"]:
@@ -452,13 +568,19 @@ def main() -> int:
         snapshot = _snapshot_layer(model, layer)
         receipt = receipts.get(layer) or _load_receipt(inventory, inventory_row)
         receipts[layer] = receipt
-        path, temporary = _candidate_path(
-            row=inventory_row,
-            local_root=None,
-            cache_root=cache,
-            repo=inventory["repo_id"],
-            revision=inventory["revision"],
-        )
+        retained = retained_root / f"layer-{layer:03d}.safetensors"
+        if retained.is_file():
+            if sha256_file(retained) != inventory_row["candidate_sha256"]:
+                raise ValueError(f"retained layer {layer} candidate identity mismatch")
+            path, temporary = retained, False
+        else:
+            path, temporary = _candidate_path(
+                row=inventory_row,
+                local_root=None,
+                cache_root=cache,
+                repo=inventory["repo_id"],
+                revision=inventory["revision"],
+            )
         install = _install_mcg_layer(model, layer, path, choices, receipt)
         student = _capture(model, token_ids[args.selection_row])
         token = _token_kld(selection_teacher, student)
@@ -478,7 +600,7 @@ def main() -> int:
             current_token = token
             current_mean = mean
             if temporary:
-                retained = cache / f"selected-layer-{layer:03d}.safetensors"
+                retained = retained_root / f"layer-{layer:03d}.safetensors"
                 path.replace(retained)
                 retained_paths[layer] = retained
         else:
@@ -486,6 +608,15 @@ def main() -> int:
             if temporary:
                 path.unlink()
         print(json.dumps({"stage": "greedy-factory-selection", **greedy}, sort_keys=True), flush=True)
+        progress = {
+            "schema": "quant-pipeline.qwen-candidate-factory-greedy-progress.v1",
+            "baseline_mean_kld": baseline_mean,
+            "current_mean_kld": current_mean,
+            "selected_layers": selected_layers,
+            "greedy_path": greedy_rows,
+        }
+        progress["progress_sha256"] = _hash_json(progress)
+        write_json(output / "greedy-progress.json", progress)
 
     selection_union_sha = _save_npy(output / "selection-union.token-kld.npy", current_token)
     selection_union_student = _capture(model, token_ids[args.selection_row])
