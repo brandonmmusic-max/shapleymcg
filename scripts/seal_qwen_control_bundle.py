@@ -235,8 +235,16 @@ def main() -> int:
     kld_root = artifact_root / "fast-k34-kld"
     report = _read_json(kld_root / "kld-report.json")
     allocation = _read_json(kld_root / "allocation.json")
+    independent = _read_json(kld_root / "independent-verification.json")
     _verify_seal(report, "report_sha256", "KLD report")
     _verify_seal(allocation, "allocation_sha256", "allocation")
+    _verify_seal(independent, "verification_sha256", "independent KLD verification")
+    if (
+        independent.get("allocation_sha256") != allocation["allocation_sha256"]
+        or independent.get("kld_report_sha256") != report["report_sha256"]
+        or independent.get("selected_reconstruction_count") != 48 * 128 * 3
+    ):
+        raise ValueError("independent verification is not bound to the complete selected control")
     fit_refs = _upload_receipts(run_root / "artifacts/hf-upload/fits", "fit", args.layers)
     candidate_refs = _upload_receipts(
         run_root / "artifacts/hf-upload/candidates", "candidate", args.layers

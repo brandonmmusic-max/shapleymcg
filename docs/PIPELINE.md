@@ -131,9 +131,11 @@ converted into a success claim.
 The Qwen fixed-Hadamard control uses
 `scripts/upload_qwen_incremental_hf.py` for fitted Hessian layers,
 `scripts/upload_qwen_candidates_hf.py` for exact K3/K4 candidates, and
-`scripts/seal_qwen_control_bundle.py` for the final closure. Candidate deletion
-is rejected until a zero-valued exact-KLD exit receipt exists. The final sealer
-rejects any missing layer, upload receipt, allocation seal, or KLD seal.
+`scripts/verify_qwen_control_result.py` for an independent selected-tensor and
+token-KLD replay before `scripts/seal_qwen_control_bundle.py` creates the final
+closure. Candidate deletion is rejected until a zero-valued exact-KLD exit
+receipt exists. The final sealer rejects any missing layer, upload receipt,
+allocation seal, KLD seal, or independent verification seal.
 
 ## Command skeleton
 
