@@ -129,6 +129,16 @@ capture request.
 This arm estimates the effect of calibration state separately from the
 whole-layer factory union. It does not silently replace the original control.
 
+The first progressive-state score uses the fast diagonal allocator and is
+therefore a candidate-pipeline diagnostic, not the full method. The next gate
+uses `rebase_qwen_allocation_candidate_factory.py` to preserve every K3/K4
+choice from the already validated full causal allocation while rebinding its
+payload bytes and reconstruction hashes to the progressive factory. This
+frozen-rate rebase isolates candidate quality at the Shapley-selected rates.
+Only after that ablation may the progressive candidates enter common scoring
+and joint factory-plus-rate allocation. `build_qwen_candidate_inventory.py`
+constructs the immutable, prefix-aware Hub inventory needed for both steps.
+
 ## Matrix-level candidate ledger
 
 The competitive ledger keys each candidate by
