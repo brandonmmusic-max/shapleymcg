@@ -20,6 +20,15 @@ LOG_ROOT=${LOG_ROOT:-${RUN_ROOT}/logs}
 GPU=${GPU:-0}
 WAIT_FOR_ENCODE=${WAIT_FOR_ENCODE:-0}
 
+mkdir -p "${LOG_ROOT}"
+on_exit() {
+    local code=$?
+    trap - EXIT
+    printf '%s\n' "${code}" > "${LOG_ROOT}/posttrained-evaluate-publish.exit"
+    exit "${code}"
+}
+trap on_exit EXIT
+
 if [[ "${WAIT_FOR_ENCODE}" == 1 ]]; then
     while ! test -f "${LOG_ROOT}/encode-publish-waves.exit"; do
         sleep 15
@@ -30,7 +39,6 @@ elif [[ "${WAIT_FOR_ENCODE}" != 0 ]]; then
 fi
 test "$(tr -d '[:space:]' < "${LOG_ROOT}/encode-publish-waves.exit")" = 0
 test -s "${HF_TOKEN_SOURCE}"
-mkdir -p "${LOG_ROOT}"
 
 run_stage() {
     local name=$1
