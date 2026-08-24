@@ -17,7 +17,7 @@ import shutil
 import time
 
 from huggingface_hub import CommitOperationAdd, HfApi
-from huggingface_hub.errors import HfHubHTTPError
+from huggingface_hub.errors import HfHubHTTPError, RemoteEntryNotFoundError
 
 from quant_pipeline.core.artifacts import canonical_json, sha256_bytes, sha256_file, write_json
 
@@ -150,7 +150,12 @@ def _batch_is_remote(
     try:
         for layer_row in batch:
             _verify_remote_layer(api, repo_id, revision, plural, layer_row)
-    except (ValueError, FileNotFoundError):
+    # A missing prefix is the normal first-publication case.  The Hub reports
+    # that as RemoteEntryNotFoundError rather than returning an empty tree.
+    # Treat only that precise remote absence (plus local/inventory mismatch)
+    # as "upload required"; authentication and other HTTP failures must still
+    # stop the publication gate.
+    except (ValueError, FileNotFoundError, RemoteEntryNotFoundError):
         return False
     return True
 
