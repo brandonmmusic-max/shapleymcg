@@ -17,6 +17,7 @@ ARTIFACTS = (
     "hill-paper-panel-v1",
     "hill-paper-kld-v1",
     "turboderp-wiki2-kld-v1",
+    "uniform-expert-controls-v1",
 )
 
 
@@ -54,11 +55,18 @@ def _inventory(root: Path, name: str, prefix: str) -> list[dict]:
     return rows
 
 
-def _verify_remote(api: HfApi, repo_id: str, revision: str, rows: list[dict]) -> None:
+def _verify_remote(
+    api: HfApi,
+    repo_id: str,
+    revision: str,
+    remote_root: str,
+    rows: list[dict],
+) -> None:
     remote = {
         item.path: item
         for item in api.list_repo_tree(
             repo_id=repo_id,
+            path_in_repo=remote_root,
             repo_type="dataset",
             revision=revision,
             recursive=True,
@@ -103,7 +111,13 @@ def main() -> int:
         )
         revision = str(commit.oid)
         revisions.append({"artifact": name, "revision": revision})
-        _verify_remote(api, args.repo_id, revision, rows)
+        _verify_remote(
+            api,
+            args.repo_id,
+            revision,
+            f"{args.path_prefix}/{name}",
+            rows,
+        )
         print(
             json.dumps(
                 {

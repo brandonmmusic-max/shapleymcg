@@ -167,6 +167,46 @@ Base control, so no strict same-rate winner is claimed.
 - Report seal: `8e9a55f56051ee62a6fd3299ae4344403073864f58d9553cf5bb7dd961d15426`
 - Token-KLD SHA256: `63402eb16197d64fc4d78d6f5110a6fbb1b35a2748875511ace5d93e3605284a`
 
+#### Same-parent expert-rate controls
+
+The decisive rate comparison holds every non-expert weight, the parent
+checkpoint, panel, teacher logits, codec candidate inventory, and scorer fixed.
+Only the expert allocation changes. Attention projections, routers, and
+`lm_head` remain source BF16 in all three rows.
+
+| Expert allocation | Expert logical BPW | Mean KLD | Top-1 agreement |
+|---|---:|---:|---:|
+| Uniform K3 | 3.0 | 0.09943217778983483 | 0.8728515625 |
+| **ShapleyMCG mixed K3/K4** | **3.5** | **0.05005581795647327** | **0.908447265625** |
+| Uniform K4 | 4.0 | 0.033991548914098856 | 0.922509765625 |
+
+The linear K3/K4 midpoint is 0.06671186335196684 KLD. The selected 3.5-bpw
+allocation is 24.9671% lower. It is also 13.8995% lower than the geometric
+midpoint (0.05813650948395977), and its top-1 agreement is 1.07666 percentage
+points above the endpoint midpoint. Relative to uniform K3, it reduces KLD by
+49.6583%. It does not beat uniform K4, which spends a full additional half-bit
+on every expert weight.
+
+This same-parent control is the primary allocation-quality claim. The
+TurboDerp card remains useful external context, but it uses a different,
+post-trained parent and quantizes attention projections, so its published K3
+and K4 rows are not substituted for these controls.
+
+The primary mixed result was independently recomputed from all sealed logits
+using
+`torch.nn.functional.kl_div(log_softmax(student), softmax(teacher))`. The
+independent mean is 0.05005581997721873, the largest per-token difference from
+the pipeline scorer is 7.152557373046875e-07, and top-1 agreement is identical.
+This confirms the direction as `KL(BF16 teacher || quantized student)` and
+rules out a KL-direction, aggregation, or token-count explanation.
+
+- Uniform K3 report seal:
+  `549b03464ae4ab79e59e54e3234afd449d9703b921f2b6c00ba0c24e9c7c31fa`
+- Uniform K4 report seal:
+  `93ee33854ad8913fe7238242133efca0253c7d9c77c6d35e41cf5626f1c3e3ef`
+- Uniform-control summary seal:
+  `37a5698c4f8dc7075bd18d915a1eaa409ec535f4ed1485e02705a5ca0e193b4e`
+
 ## What this result establishes
 
 It establishes that the fixed-Hadamard, source-derived absolute-v31,

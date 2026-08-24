@@ -20,7 +20,13 @@ TurboDerp/ExLlamaV3 WikiText-2 20k protocol measured `0.05005581795647327`
 over 20,480 positions with `0.908447265625` top-1 agreement. The paper panel is
 not an author-provided token panel, and the published TurboDerp quant uses the
 post-trained Qwen parent rather than Base, so neither is labeled a strict
-head-to-head result.
+head-to-head result. The strict same-parent controls keep attention, routers,
+and the head in BF16: uniform expert K3 measured `0.09943217778983483`, the
+3.5-bpw selected mix measured `0.05005581795647327`, and uniform expert K4
+measured `0.033991548914098856`. The selected mix is 24.9671% below the linear
+K3/K4 KLD midpoint and 13.8995% below the geometric midpoint. An independent
+PyTorch `kl_div` replay agrees with the primary mixed score to about `2e-9` in
+the mean.
 See the [complete result and provenance ledger](docs/QWEN_B200_CONTROL_RESULT.md).
 
 This is a validation-model result, not SM100 packed-runtime qualification. The

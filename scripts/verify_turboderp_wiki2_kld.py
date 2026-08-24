@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""Independently verify a sealed WikiText KLD result with torch.kl_div.
+
+This deliberately does not import the pipeline scorer.  It recomputes
+KL(teacher || student) from the stored logits using PyTorch's reference
+functional implementation and checks the stored per-token values and top-1
+agreement.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+from safetensors import safe_open
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_logits(path: Path) -> torch.Tensor:
+    with safe_open(path, framework="pt", device="cpu") as handle:
+        return handle.get_tensor("logits").float()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("result", type=Path)
+    parser.add_argument("--atol", type=float, default=2e-6)
+    args = parser.parse_args()
+
+    root = args.result.resolve()
+    report = json.loads((root / "kld-report.json").read_text())
+    stored = np.load(root / "token-kld.npy").astype(np.float32, copy=False).reshape(-1)
+    teacher_paths = sorted((root / "teacher-logits").glob("row-*.safetensors"))
+    student_paths = sorted((root / "student-logits").glob("row-*.safetensors"))
+    if len(teacher_paths) != len(student_paths) or not teacher_paths:
+        raise ValueError("teacher/student capture count mismatch")
+
+    values: list[np.ndarray] = []
+    agreements = 0
+    count = 0
+    for teacher_path, student_path in zip(teacher_paths, student_paths, strict=True):
+        teacher = load_logits(teacher_path)
+        student = load_logits(student_path)
+        if teacher.shape != student.shape or teacher.ndim != 2:
+            raise ValueError(f"logit geometry mismatch: {teacher_path.name}")
+        # torch.kl_div(input_log_probs, target_probs) evaluates
+        # target * (log(target) - input), hence KL(teacher || student).
+        per_token = F.kl_div(
+            F.log_softmax(student, dim=-1),
+            F.softmax(teacher, dim=-1),
+            reduction="none",
+        ).sum(dim=-1)
+        values.append(per_token.numpy())
+        agreements += int(torch.eq(teacher.argmax(-1), student.argmax(-1)).sum())
+        count += int(teacher.shape[0])
+
+    independent = np.concatenate(values).astype(np.float32, copy=False)
+    if independent.shape != stored.shape:
+        raise ValueError(f"token array shape mismatch: {independent.shape} != {stored.shape}")
+    delta = np.abs(independent.astype(np.float64) - stored.astype(np.float64))
+    observed_mean = float(independent.astype(np.float64).mean())
+    reported_mean = float(report["summary"]["mean"])
+    observed_top1 = agreements / count
+    reported_top1 = float(report["top1_agreement"])
+    result = {
+        "schema": "quant-pipeline.turboderp-wiki2-kld-independent-verification.v1",
+        "ok": bool(
+            float(delta.max(initial=0.0)) <= args.atol
+            and abs(observed_mean - reported_mean) <= args.atol
+            and abs(observed_top1 - reported_top1) <= 1e-12
+        ),
+        "direction": "KL(bf16 teacher || quantized student)",
+        "implementation": "torch.nn.functional.kl_div(log_softmax(student), softmax(teacher))",
+        "positions": count,
+        "stored_token_kld_sha256": sha256_file(root / "token-kld.npy"),
+        "independent_mean": observed_mean,
+        "reported_mean": reported_mean,
+        "mean_absolute_delta": float(delta.mean()),
+        "max_absolute_delta": float(delta.max(initial=0.0)),
+        "independent_top1_agreement": observed_top1,
+        "reported_top1_agreement": reported_top1,
+        "atol": args.atol,
+    }
+    destination = root / "independent-verification.json"
+    destination.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(result, sort_keys=True))
+    return 0 if result["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
