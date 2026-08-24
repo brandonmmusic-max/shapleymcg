@@ -175,7 +175,7 @@ run_stage hf-candidates \
     --batch-layers 4 \
     --retry-minutes 75
 
-git_revision=$(git -C "${CODE_ROOT}" rev-parse HEAD)
+git_revision=${GIT_REVISION:-$(git -C "${CODE_ROOT}" rev-parse HEAD)}
 run_stage seal-posttrained-results \
     "${PYTHON}" "${CODE_ROOT}/scripts/seal_qwen_posttrained_result_bundle.py" \
     --run-root "${RUN_ROOT}" \
