@@ -63,7 +63,7 @@ def _capture(command: list[str]) -> dict[str, Any]:
     }
 
 
-def _inventory(root: Path) -> list[dict[str, Any]]:
+def _inventory(root: Path, *, exclude: frozenset[str] = frozenset({"bundle-manifest.json"})) -> list[dict[str, Any]]:
     return [
         {
             "path": path.relative_to(root).as_posix(),
@@ -71,7 +71,7 @@ def _inventory(root: Path) -> list[dict[str, Any]]:
             "sha256": sha256_file(path),
         }
         for path in sorted(root.rglob("*"))
-        if path.is_file() and path.name not in {"bundle-manifest.json", "SHA256SUMS"}
+        if path.is_file() and path.name not in exclude
     ]
 
 
@@ -316,7 +316,7 @@ def main() -> int:
         },
     )
     (output / "README.md").write_text(_result_readme(report, allocation, args.git_revision))
-    inventory = _inventory(output)
+    inventory = _inventory(output, exclude=frozenset({"bundle-manifest.json", "SHA256SUMS"}))
     sums = "".join(f"{row['sha256']}  {row['path']}\n" for row in inventory)
     (output / "SHA256SUMS").write_text(sums)
     manifest = {
