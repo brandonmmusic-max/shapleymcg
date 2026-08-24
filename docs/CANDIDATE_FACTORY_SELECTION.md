@@ -80,6 +80,41 @@ Factory choice is presently whole-layer. This is intentionally a low-dimensional
 first test: it can show that one factory dominates, or that the pools are
 complementary, without searching 18,432 individual matrix choices on one row.
 
+### Measured result
+
+The selection row admitted MCG layers 5, 32, 34, 40, and 46. Its diagnostic
+mean KLD fell from `0.02013594786940779` to `0.016742801006509656`
+(16.851190%), but that row was used for selection and is not an endpoint.
+
+Across the nine untouched rows, the reconstructed TurboDerp-candidate baseline
+measured `0.030283841053315566`; the selected union measured
+`0.02936814480556666`, an absolute reduction of `0.0009156962477489026`
+(3.023712%). The union won 5 of 9 rows. A seeded paired 64-token block bootstrap
+gave `[-0.00011704741100369084, 0.0019815815832019573]` for baseline minus
+union. Because that interval crosses zero, this is directional held-out
+evidence that the pools contain complementary layer reconstructions. It does
+not establish candidate-factory superiority at the 95% interval gate. The
+correct production response is to retain both factories in the candidate
+quiver and validate the eventual coupled allocation on a larger untouched
+panel.
+
+The report seal is
+`1b8897431f07768405afc1d4d98d970acdec84733d2e3bacc49da301978492a1`;
+the exact bit-allocation seal is
+`51bf1caf86292968055a054b6b5afcdb36354fad05e1ede109303634fa7edc6e`;
+and the factory-allocation seal is
+`1cd0759dd810b137e701d32a36d04e3ac673e7588c4180aff655410fff25bc34`.
+Independent Torch float64 replay verified the tokenwise result at `2e-11`
+absolute tolerance; verification seal:
+`865d8f696b29cd5b84e51910fbf4fa4632082b44d63e67c973507d3c7dce3397`.
+The complete 39.64 GB, 136-file
+[artifact tree](https://huggingface.co/datasets/brandonmusic/shapleymcg-qwen3-30b-a3b-posttrained-reproducibility/tree/2de2d5e87e3493739784eec74b1446991b910614/results/qwen3-30b-a3b-posttrained-v1/candidate-factory-union-v1)
+is remotely verified at Hugging Face dataset revision
+`2de2d5e87e3493739784eec74b1446991b910614`; tree-manifest seal:
+`c6029ca5c7d0cd54c00f633b498256605de2f7c97c73d82fe6f4a99c8ccae2c5`;
+remote-verification receipt seal:
+`0d6bc93ad6430524cf535159e3cabb8850d9faa10b8beba064cda0a87e31b730`.
+
 ## Progressive-state candidate arm
 
 TurboDerp v0.0.1 gathers later-layer calibration states after earlier modules

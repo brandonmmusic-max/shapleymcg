@@ -58,14 +58,19 @@ bytes; it is not a claim about a native TurboDerp 3.5 checkpoint, which was not
 published. The sealed comparison is under
 [`results/qwen3-30b-a3b-posttrained/turboderp-v001-allocation-proof`](results/qwen3-30b-a3b-posttrained/turboderp-v001-allocation-proof/comparison.json).
 
-Candidate production is now being isolated from allocation. The controlled
-factory-union protocol freezes the full causal bit allocation and tests
-same-bit whole-layer reconstructions from the published TurboDerp pool and the
-existing R10/MCG pool on a selection row, followed by nine untouched validation
-rows. A separate progressive-state arm captures calibration activations from a
-sealed causal reconstruction while continuing to encode immutable BF16 source
-weights. The executable protocol and the planned matrix-level multi-factory
-ledger are documented in
+Candidate production has now been isolated from allocation in a first
+whole-layer test. With the full causal 9,216-K3 plus 9,216-K4 allocation frozen,
+row 0 selected MCG reconstructions for layers 5, 32, 34, 40, and 46 and retained
+the published TurboDerp reconstructions for the other 43 layers. On nine rows
+excluded from selection, the union lowered mean KLD from
+`0.030283841053315566` to `0.02936814480556666` (**3.023712%**) and won 5 of 9
+rows. The paired 64-token block interval for baseline minus union was
+`[-0.0001170474, 0.0019815816]`, so the lower held-out mean is directional
+evidence of complementary candidate pools, not a statistically decisive
+factory-superiority claim. A separate progressive-state arm captures
+calibration activations from a sealed causal reconstruction while continuing
+to encode immutable BF16 source weights. The executable protocol and the
+matrix-level multi-factory ledger are documented in
 [candidate-factory selection](docs/CANDIDATE_FACTORY_SELECTION.md). The
 model-agnostic `quant_pipeline.candidates.factory_union` boundary makes native
 MCG coverage mandatory, admits upstream/ModelOpt-style proposals additively,

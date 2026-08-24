@@ -117,6 +117,13 @@ class CandidateUnit:
 
 @dataclass(frozen=True)
 class FactoryProposal:
+    """One private payload proposal plus its shared compatibility contract.
+
+    ``exact_stored_bytes`` counts only the unit-private payload.
+    ``fixed_shared_bytes`` is the complete shared payload cost for the named
+    coupling group/domain and is charged once by the coupled allocator.
+    """
+
     unit_id: str
     rate: int
     factory_name: str

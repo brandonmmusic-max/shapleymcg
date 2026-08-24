@@ -178,6 +178,41 @@ This establishes allocation-rule superiority on common reconstructed
 candidate bytes. It remains distinct from a whole-pipeline comparison against
 a native v0.0.1 3.5 checkpoint, which TurboDerp did not publish.
 
+### Candidate-factory union at the frozen causal allocation
+
+The next ablation held the full causal allocation, exact 9,216 K3 plus 9,216 K4
+matrix count, post-trained parent, K4 body/K6 head, BF16 teacher, eager
+arithmetic, and evaluation tokens fixed. It changed only which same-rate
+routed-expert layer reconstruction was installed: the published TurboDerp
+candidate or the independently produced R10/MCG candidate.
+
+Selection row 0 admitted MCG layers 5, 32, 34, 40, and 46. On validation rows
+1 through 9, which were excluded from every factory decision, the result was:
+
+| Arm | Mean KLD | Rows better |
+|---|---:|---:|
+| Published TurboDerp reconstructions at causal rates | 0.0302838410533 | 4/9 |
+| **Selected TurboDerp plus MCG union** | **0.0293681448056** | **5/9** |
+
+The absolute reduction was `0.0009156962477489026` and the relative reduction
+was **3.023712%**. The paired 64-token block bootstrap interval for baseline
+minus union was `[-0.0001170474, 0.0019815816]`. The direction therefore
+generalized in aggregate, but the interval crosses zero. This supports keeping
+both sources as algorithmically generated candidate factories; it does not
+support a statistically decisive factory-superiority claim. The result also
+does not change the earlier allocator-only conclusion, which used identical
+candidate bytes and had a strictly positive interval.
+
+Report seal:
+`1b8897431f07768405afc1d4d98d970acdec84733d2e3bacc49da301978492a1`.
+Independent Torch float64 verification seal:
+`865d8f696b29cd5b84e51910fbf4fa4632082b44d63e67c973507d3c7dce3397`.
+The 39.64 GB
+[sealed tree](https://huggingface.co/datasets/brandonmusic/shapleymcg-qwen3-30b-a3b-posttrained-reproducibility/tree/2de2d5e87e3493739784eec74b1446991b910614/results/qwen3-30b-a3b-posttrained-v1/candidate-factory-union-v1)
+is remotely verified at Hugging Face revision
+`2de2d5e87e3493739784eec74b1446991b910614`; manifest seal
+`c6029ca5c7d0cd54c00f633b498256605de2f7c97c73d82fe6f4a99c8ccae2c5`.
+
 ## External paper context
 
 Hill et al. report `0.0353` for their additive method and `0.0429` for their
