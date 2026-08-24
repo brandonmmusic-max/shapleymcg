@@ -28,10 +28,13 @@ revision, and construction rules. It is not a calibration corpus.
 
 ## Stage 1: corrected actual-codec re-probe
 
-**Status: implemented locally; real-Qwen gate unvalidated.** The full-second-
-moment fitter, canonical absolute-v31/GSS artifact, corrected-codec adapter,
-routed scorer, and causal runner surfaces exist and have tiny/local tests. No
-clean-node real-Qwen probe result has yet passed the production gates.
+**Status: the fixed-Hadamard corrected-R10 Base control is complete; the full
+Aumann-Shapley research arm remains unvalidated.** The full-second-moment
+fitter, canonical absolute-v31/GSS artifact, corrected-codec adapter, routed
+scorer, and causal runner surfaces exist. The published Base control exercised
+the corrected codec over all 48 Qwen layers and sealed its calibration,
+candidate, allocation, and end-to-end KLD evidence. It did not execute the
+competitive searched-MCG/Aumann-Shapley branch described below.
 
 Start with representative early/middle/late layers. Reconstruct candidates
 through the exact deployed codec—not an MSE-only fake quant—and compare:
@@ -48,11 +51,14 @@ rate is the cheapest likely win.
 
 ## Stage 2: build Pareto frontiers
 
-**Status: implemented locally; campaign evidence pending.** The candidate
-generator persists exact trellis/vector/reconstruction objects, all eight
-K3/K4 choices, versioned K5 decisions, routed metrics, and byte accounting.
-Production remains blocked on sealed real captures, the corrected SM100 encoder
-extension, and end-to-end Qwen validation.
+**Status: 48-layer fixed-Hadamard K3/K4 campaign evidence is published; the
+competitive research frontier remains pending.** The candidate generator
+persists exact trellis/vector/reconstruction objects, all eight K3/K4 choices,
+versioned K5 decisions, routed metrics, and byte accounting. The Base control
+published all 48 fit layers, all 48 exact-codec candidate layers, the corrected
+SM100 extension, and end-to-end Qwen validation. Searched MCG transforms,
+Aumann-Shapley/Fisher attribution, and any K5 research frontier are not implied
+by that control.
 
 For every sampled expert, encode and reconstruct gate/up/down candidates at the
 allowed bit rates. Score complete expert-function outputs. Jointly evaluate the
@@ -62,11 +68,13 @@ exact only after candidates are grouped into physical shards and are audited the
 
 ## Stage 3: global allocation
 
-**Status: allocator and causal orchestration implemented locally.** The
-multiple-choice knapsack charges expert-private choices plus layer-fixed shared
-bytes. The runner schedules causal recapture/refit/re-encode and KLD re-anchors,
-with immutable rollback/reallocation generations. This behavior is locally
-tested but not yet validated on the complete 48-layer Qwen checkpoint.
+**Status: the exact-half K3/K4 Base-control allocation is measured; causal
+research allocation remains unvalidated.** The multiple-choice knapsack charges
+expert-private choices plus layer-fixed shared bytes. The runner schedules
+causal recapture/refit/re-encode and KLD re-anchors, with immutable
+rollback/reallocation generations. The published Base control validates its
+fixed-cost exact-3.5-bit allocation over all 48 layers. It does not establish a
+complete causal reallocation campaign using Aumann-Shapley/Fisher scores.
 
 Collapse dominated candidates into per-expert or per-layer Pareto frontiers,
 then solve one multiple-choice knapsack over the whole model's exact codec

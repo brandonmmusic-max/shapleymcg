@@ -51,6 +51,8 @@ mean. The compact five-seed record is checked in under
 [`results/qwen3-30b-a3b-base`](results/qwen3-30b-a3b-base/naive-3p5-controls-summary.json);
 full logits and tokenwise KLD are published on Hugging Face.
 See the [complete result and provenance ledger](docs/QWEN_B200_CONTROL_RESULT.md).
+The [current-state reproducibility audit](docs/QWEN_BASE_REPRODUCIBILITY_AUDIT.md)
+maps each Base-control requirement to immutable GitHub and Hugging Face evidence.
 
 This is a validation-model result, not SM100 packed-runtime qualification. The
 published model stores the measured reconstructions in BF16 because the
