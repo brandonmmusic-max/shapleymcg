@@ -181,6 +181,7 @@ Qwen3-30B-A3B satisfies and Gemma 4's 704-wide experts do not. Native runtime
 qualification remains a separate gate.
 
 See [the complete ShapleyMCG method](docs/SHAPLEYMCG_METHOD.md),
+[the controlled TurboDerp and Shapley-paper superiority protocol](docs/TURBODERP_SHAPLEY_SUPERIORITY_PROTOCOL.md),
 [the full pipeline](docs/PIPELINE.md), [scientific gates](docs/SCIENTIFIC_METHOD.md),
 [model decision](docs/MODEL_SELECTION.md), [scientific lineage and references](docs/REFERENCES.md),
 and [two-B200 runbook](docs/B200_RUNBOOK.md).

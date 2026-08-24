@@ -129,6 +129,34 @@ def test_exact_turboderp_3p5_plan_is_matched_and_nonmutating(tmp_path):
     assert not output.exists()
 
 
+def test_exact_turboderp_pool_only_plan_does_not_require_our_candidates(tmp_path):
+    output = tmp_path / "exact-3p5-stock"
+    result = run(
+        "measure_qwen_turboderp_exact_3p5.py",
+        "--source-model",
+        str(tmp_path / "source"),
+        "--allocation",
+        str(tmp_path / "allocation.json"),
+        "--panel-root",
+        str(tmp_path / "panel"),
+        "--turboderp-k3-model",
+        str(tmp_path / "turbo-k3"),
+        "--turboderp-k3-revision",
+        "1" * 40,
+        "--turboderp-k4-model",
+        str(tmp_path / "turbo-k4"),
+        "--exllamav3-root",
+        str(tmp_path / "exllamav3"),
+        "--output",
+        str(output),
+        "--turboderp-pool-only",
+    )
+    plan = json.loads(result.stdout)
+    assert plan["encode_root"] is None
+    assert plan["arms"] == ["turboderp-selected-k34"]
+    assert not output.exists()
+
+
 def test_hybrid_k4_resume_adopts_only_fully_sealed_arm(tmp_path):
     sys.path.insert(0, str(ROOT / "scripts"))
     try:

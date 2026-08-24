@@ -126,7 +126,7 @@ def _install_turbo_selected_k3(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-model", type=Path, required=True)
-    parser.add_argument("--encode-root", type=Path, required=True)
+    parser.add_argument("--encode-root", type=Path)
     parser.add_argument("--allocation", type=Path, required=True)
     parser.add_argument("--panel-root", type=Path, required=True)
     parser.add_argument("--turboderp-k3-model", type=Path, required=True)
@@ -136,12 +136,17 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--attention-backend", default="eager")
+    parser.add_argument(
+        "--turboderp-pool-only",
+        action="store_true",
+        help="score only the selected allocation reconstructed from the published TurboDerp K3/K4 pool",
+    )
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     plan = {
         "schema": "quant-pipeline.qwen-turboderp-exact-3p5-plan.v1",
         "source_model": str(args.source_model.resolve()),
-        "encode_root": str(args.encode_root.resolve()),
+        "encode_root": str(args.encode_root.resolve()) if args.encode_root else None,
         "allocation": str(args.allocation.resolve()),
         "panel_root": str(args.panel_root.resolve()),
         "turboderp_k3_model": str(args.turboderp_k3_model.resolve()),
@@ -152,7 +157,11 @@ def main() -> int:
         "output": str(args.output.resolve()),
         "expert_rate": "exact half K3 / half K4 = 3.5 logical BPW",
         "fixed_nonexpert_scope": "TurboDerp K4 body and K6 head",
-        "arms": ["turboderp-selected-k34", "hybrid-ours-selected-k34"],
+        "arms": (
+            ["turboderp-selected-k34"]
+            if args.turboderp_pool_only
+            else ["turboderp-selected-k34", "hybrid-ours-selected-k34"]
+        ),
         "comparison_kind": "matched allocation across independently produced reconstruction pools",
         "codec_only_ablation": False,
         "native_turboderp_3p5_published": False,
@@ -168,6 +177,8 @@ def main() -> int:
     print(json.dumps(plan, sort_keys=True), flush=True)
     if not args.execute:
         return 0
+    if not args.turboderp_pool_only and args.encode_root is None:
+        raise ValueError("--encode-root is required unless --turboderp-pool-only is selected")
 
     import torch
     from transformers import AutoModelForCausalLM
@@ -221,20 +232,22 @@ def main() -> int:
         args.workers,
         "quant-pipeline.qwen-turboderp-exact-3p5-arm.v1",
     )
-    _install_ours(
-        model,
-        args.encode_root.resolve(),
-        choices,
-        "install-ours-selected-k34-matched",
-    )
-    ours = _score(
-        teacher_paths,
-        _capture(model, token_ids, output, "hybrid-ours-selected-k34"),
-        output,
-        "hybrid-ours-selected-k34",
-        args.workers,
-        "quant-pipeline.qwen-turboderp-exact-3p5-arm.v1",
-    )
+    ours = None
+    if not args.turboderp_pool_only:
+        _install_ours(
+            model,
+            args.encode_root.resolve(),
+            choices,
+            "install-ours-selected-k34-matched",
+        )
+        ours = _score(
+            teacher_paths,
+            _capture(model, token_ids, output, "hybrid-ours-selected-k34"),
+            output,
+            "hybrid-ours-selected-k34",
+            args.workers,
+            "quant-pipeline.qwen-turboderp-exact-3p5-arm.v1",
+        )
     del model
     torch.cuda.empty_cache()
     summary = {
@@ -253,16 +266,16 @@ def main() -> int:
                 "top1_agreement": row["top1_agreement"],
                 "report_sha256": row["report_sha256"],
             }
-            for row in (turbo, ours)
+            for row in (turbo,) + ((ours,) if ours is not None else ())
         },
-        "ours_kld_reduction_vs_turboderp_at_exact_3p5": (
-            turbo["summary"]["mean"] - ours["summary"]["mean"]
-        )
-        / turbo["summary"]["mean"],
-        "ours_top1_gain_vs_turboderp_at_exact_3p5": (
-            ours["top1_agreement"] - turbo["top1_agreement"]
-        ),
     }
+    if ours is not None:
+        summary["ours_kld_reduction_vs_turboderp_at_exact_3p5"] = (
+            turbo["summary"]["mean"] - ours["summary"]["mean"]
+        ) / turbo["summary"]["mean"]
+        summary["ours_top1_gain_vs_turboderp_at_exact_3p5"] = (
+            ours["top1_agreement"] - turbo["top1_agreement"]
+        )
     summary["summary_sha256"] = _hash_json(summary)
     write_json(output / "summary.json", summary)
     print(json.dumps({"ok": True, **summary}, sort_keys=True), flush=True)
