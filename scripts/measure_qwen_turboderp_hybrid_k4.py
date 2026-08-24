@@ -200,6 +200,16 @@ def _capture(model, token_ids: np.ndarray, root: Path, arm: str) -> list[Path]:
     return paths
 
 
+def _sealed_receipt(path: Path, label: str) -> dict:
+    value = json.loads(path.read_text())
+    expected = value.get("receipt_sha256")
+    if expected != _hash_json(
+        {key: item for key, item in value.items() if key != "receipt_sha256"}
+    ):
+        raise ValueError(f"{label} receipt seal mismatch")
+    return value
+
+
 def _score(
     teacher_paths: list[Path],
     student_paths: list[Path],
@@ -245,9 +255,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-model", type=Path, required=True)
     parser.add_argument("--source-revision", required=True)
+    parser.add_argument("--source-receipt", type=Path, required=True)
     parser.add_argument("--encode-root", type=Path, required=True)
     parser.add_argument("--panel-root", type=Path, required=True)
     parser.add_argument("--turboderp-model", type=Path, required=True)
+    parser.add_argument("--turboderp-receipt", type=Path, required=True)
+    parser.add_argument("--lineage-receipt", type=Path, required=True)
     parser.add_argument("--exllamav3-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=8)
@@ -258,9 +271,12 @@ def main() -> int:
         "schema": "quant-pipeline.qwen-posttrained-turboderp-hybrid-k4-plan.v1",
         "source_model": str(args.source_model.resolve()),
         "source_revision": args.source_revision,
+        "source_receipt": str(args.source_receipt.resolve()),
         "encode_root": str(args.encode_root.resolve()),
         "panel_root": str(args.panel_root.resolve()),
         "turboderp_model": str(args.turboderp_model.resolve()),
+        "turboderp_receipt": str(args.turboderp_receipt.resolve()),
+        "lineage_receipt": str(args.lineage_receipt.resolve()),
         "turboderp_revision": "0b83e92c6d3b5a868ecd5a5fbb3bcc1920e388ef",
         "exllamav3_root": str(args.exllamav3_root.resolve()),
         "output": str(args.output.resolve()),
@@ -280,6 +296,24 @@ def main() -> int:
 
     import torch
     from transformers import AutoModelForCausalLM
+
+    source_receipt = _sealed_receipt(args.source_receipt.resolve(), "source")
+    turbo_receipt = _sealed_receipt(
+        args.turboderp_receipt.resolve(), "TurboDerp checkpoint"
+    )
+    lineage_receipt = _sealed_receipt(
+        args.lineage_receipt.resolve(), "TurboDerp lineage"
+    )
+    if (
+        source_receipt.get("revision") != args.source_revision
+        or turbo_receipt.get("revision")
+        != "0b83e92c6d3b5a868ecd5a5fbb3bcc1920e388ef"
+        or lineage_receipt.get("source", {}).get("revision")
+        != args.source_revision
+        or lineage_receipt.get("reference", {}).get("revision")
+        != turbo_receipt.get("revision")
+    ):
+        raise ValueError("source, TurboDerp, and inferred-lineage receipts disagree")
 
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -363,6 +397,9 @@ def main() -> int:
     summary = {
         "schema": "quant-pipeline.qwen-posttrained-turboderp-hybrid-k4.v1",
         "source_revision": args.source_revision,
+        "source_receipt_sha256": source_receipt["receipt_sha256"],
+        "turboderp_receipt_sha256": turbo_receipt["receipt_sha256"],
+        "lineage_receipt_sha256": lineage_receipt["receipt_sha256"],
         "panel_sha256": panel["panel_sha256"],
         "candidate_receipts": candidate_receipts,
         "turboderp_scope": turbo_scope,
