@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Evaluate the completed post-trained Qwen encode, publish every candidate,
 # seal the compact result/provenance bundle, and verify that bundle on the Hub.
-# This script intentionally starts only after encode-publish-waves.exit is zero.
+# KLD may start as soon as all 48 sealed encode receipts exist.  Fit/candidate
+# publication remains behind the aggregate encode-publish gate.
 
 RUN_ROOT=${RUN_ROOT:-/qwen-shapleymcg-post-run}
 CODE_ROOT=${CODE_ROOT:-${RUN_ROOT}/code}
@@ -20,6 +21,7 @@ HF_TOKEN_SOURCE=${HF_TOKEN_SOURCE:-/root/.cache/huggingface/token}
 LOG_ROOT=${LOG_ROOT:-${RUN_ROOT}/logs}
 GPU=${GPU:-0}
 WAIT_FOR_ENCODE=${WAIT_FOR_ENCODE:-0}
+WAIT_FOR_LAYER_ENCODES=${WAIT_FOR_LAYER_ENCODES:-0}
 
 mkdir -p "${LOG_ROOT}"
 on_exit() {
@@ -30,15 +32,55 @@ on_exit() {
 }
 trap on_exit EXIT
 
-if [[ "${WAIT_FOR_ENCODE}" == 1 ]]; then
+wait_for_encode_publication() {
     while ! test -f "${LOG_ROOT}/encode-publish-waves.exit"; do
         sleep 15
     done
-elif [[ "${WAIT_FOR_ENCODE}" != 0 ]]; then
+    test "$(tr -d '[:space:]' < "${LOG_ROOT}/encode-publish-waves.exit")" = 0
+}
+
+all_layer_encodes_complete() {
+    local layer item exit_file
+    for ((layer = 0; layer < 48; layer++)); do
+        item=$(printf 'layer-%03d' "${layer}")
+        exit_file="${LOG_ROOT}/fast-encode-layer-$(printf '%03d' "${layer}").exit"
+        test -f "${exit_file}" || return 1
+        test "$(tr -d '[:space:]' < "${exit_file}")" = 0 || return 2
+        test -s "${RUN_ROOT}/fast-encode/${item}/encode-receipt.json" || return 1
+    done
+}
+
+if [[ "${WAIT_FOR_ENCODE}" != 0 && "${WAIT_FOR_ENCODE}" != 1 ]]; then
     printf 'WAIT_FOR_ENCODE must be 0 or 1\n' >&2
     exit 2
 fi
-test "$(tr -d '[:space:]' < "${LOG_ROOT}/encode-publish-waves.exit")" = 0
+if [[ "${WAIT_FOR_LAYER_ENCODES}" != 0 && "${WAIT_FOR_LAYER_ENCODES}" != 1 ]]; then
+    printf 'WAIT_FOR_LAYER_ENCODES must be 0 or 1\n' >&2
+    exit 2
+fi
+if [[ "${WAIT_FOR_ENCODE}" == 1 && "${WAIT_FOR_LAYER_ENCODES}" == 1 ]]; then
+    printf 'select only one encode wait mode\n' >&2
+    exit 2
+fi
+
+if [[ "${WAIT_FOR_LAYER_ENCODES}" == 1 ]]; then
+    while true; do
+        set +e
+        all_layer_encodes_complete
+        layer_status=$?
+        set -e
+        case "${layer_status}" in
+            0) break ;;
+            2)
+                printf 'a layer encode failed before KLD\n' >&2
+                exit 1
+                ;;
+        esac
+        sleep 15
+    done
+else
+    wait_for_encode_publication
+fi
 test -s "${HF_TOKEN_SOURCE}"
 
 run_stage() {
@@ -54,21 +96,19 @@ run_stage() {
     return "${code}"
 }
 
-# Once every fit has been verified on the Hub and every candidate has been
-# emitted, these raw activation chunks are reproducible scratch. Preserve the
-# sealed manifests and receipts while releasing enough space for nine complete
-# 10x2048 student-logit arms.
-for ((layer = 0; layer < 48; layer++)); do
-    item=$(printf 'layer-%03d' "${layer}")
-    test -s "${RUN_ROOT}/artifacts/hf-upload/fits/${item}.json"
-    test -s "${RUN_ROOT}/fast-encode/${item}/encode-receipt.json"
-done
-find "${CAPTURE_ROOT}/fit" \
-    -mindepth 1 -maxdepth 1 -type d -name 'layer-[0-9][0-9][0-9]' \
-    -exec rm -rf -- {} +
-
 export PYTHONPATH="${ENCODING_SITE}:${CODE_ROOT}/src:${PYTHONPATH:-}"
-run_stage matched-k4-evaluation \
+matched_complete() {
+    test -f "${LOG_ROOT}/matched-k4-evaluation.exit" \
+        && test "$(tr -d '[:space:]' < "${LOG_ROOT}/matched-k4-evaluation.exit")" = 0 \
+        && test -s "${ARTIFACT_ROOT}/matched-k4-comparison/summary.json" \
+        && test -s "${ARTIFACT_ROOT}/matched-k4-comparison/ours-selected-k34/kld-report.json" \
+        && test -s "${ARTIFACT_ROOT}/matched-k4-comparison/ours-expert-k4/kld-report.json" \
+        && test -s "${ARTIFACT_ROOT}/matched-k4-comparison/turboderp-full-k4/kld-report.json" \
+        && test -s "${ARTIFACT_ROOT}/matched-k4-comparison/hybrid-ours-experts/kld-report.json"
+}
+
+if ! matched_complete; then
+    run_stage matched-k4-evaluation \
     env CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" \
     "${CODE_ROOT}/scripts/measure_qwen_turboderp_hybrid_k4.py" \
     --source-model "${SOURCE_MODEL}" \
@@ -84,8 +124,14 @@ run_stage matched-k4-evaluation \
     --workers 8 \
     --attention-backend eager \
     --execute
+else
+    printf 'adopted successful matched K4 evaluation\n'
+fi
 
-run_stage naive-controls \
+if ! test -f "${LOG_ROOT}/naive-controls.exit" \
+    || ! test "$(tr -d '[:space:]' < "${LOG_ROOT}/naive-controls.exit")" = 0 \
+    || ! test -s "${ARTIFACT_ROOT}/naive-3p5-controls-v1/summary.json"; then
+    run_stage naive-controls \
     env CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" \
     "${CODE_ROOT}/scripts/measure_qwen_naive_mixed_controls.py" \
     --source-model "${SOURCE_MODEL}" \
@@ -97,6 +143,21 @@ run_stage naive-controls \
     --workers 8 \
     --attention-backend eager \
     --execute
+else
+    printf 'adopted successful naive controls\n'
+fi
+
+# Publication/deletion remains behind the full remote fit gate even when KLD
+# started early from sealed local encode receipts.
+wait_for_encode_publication
+for ((layer = 0; layer < 48; layer++)); do
+    item=$(printf 'layer-%03d' "${layer}")
+    test -s "${RUN_ROOT}/artifacts/hf-upload/fits/${item}.json"
+    test -s "${RUN_ROOT}/fast-encode/${item}/encode-receipt.json"
+done
+find "${CAPTURE_ROOT}/fit" \
+    -mindepth 1 -maxdepth 1 -type d -name 'layer-[0-9][0-9][0-9]' \
+    -exec rm -rf -- {} +
 
 candidate_token="${RUN_ROOT}/.hf-candidates.token"
 install -m 600 "${HF_TOKEN_SOURCE}" "${candidate_token}"
