@@ -170,6 +170,10 @@ full Qwen control run of the ShapleyMCG pipeline.
 - Allocation SHA256: `{allocation['allocation_sha256']}`
 - KLD report SHA256: `{report['report_sha256']}`
 
+The exact expanded BF16 validation model is published at
+[`brandonmusic/Qwen3-30B-A3B-ShapleyMCG-K34-Validation-Reconstruction`](https://huggingface.co/brandonmusic/Qwen3-30B-A3B-ShapleyMCG-K34-Validation-Reconstruction).
+Its verified publication receipt is included in this control bundle.
+
 The KLD gate replays exact codec-produced BF16 reconstructions in Transformers;
 it is not a packed-runtime, CUDA-graph, or throughput qualification. The
 historical GLM-style control is the sealed 2,048-token Qwen-tokenized prefix of
@@ -200,6 +204,7 @@ def main() -> int:
     parser.add_argument("--code-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--git-revision", required=True)
+    parser.add_argument("--model-publication-receipt", type=Path, required=True)
     parser.add_argument("--layers", type=int, default=48)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
@@ -216,6 +221,7 @@ def main() -> int:
         "code_root": str(code_root),
         "output": str(output),
         "git_revision": args.git_revision,
+        "model_publication_receipt": str(args.model_publication_receipt.resolve()),
         "layers": args.layers,
         "dry_run": not args.execute,
     }
@@ -236,15 +242,23 @@ def main() -> int:
     report = _read_json(kld_root / "kld-report.json")
     allocation = _read_json(kld_root / "allocation.json")
     independent = _read_json(kld_root / "independent-verification.json")
+    model_publication = _read_json(args.model_publication_receipt.resolve())
     _verify_seal(report, "report_sha256", "KLD report")
     _verify_seal(allocation, "allocation_sha256", "allocation")
     _verify_seal(independent, "verification_sha256", "independent KLD verification")
+    _verify_seal(model_publication, "receipt_sha256", "model publication receipt")
     if (
         independent.get("allocation_sha256") != allocation["allocation_sha256"]
         or independent.get("kld_report_sha256") != report["report_sha256"]
         or independent.get("selected_reconstruction_count") != 48 * 128 * 3
     ):
         raise ValueError("independent verification is not bound to the complete selected control")
+    if (
+        model_publication.get("repo_type") != "model"
+        or model_publication.get("repo_id")
+        != "brandonmusic/Qwen3-30B-A3B-ShapleyMCG-K34-Validation-Reconstruction"
+    ):
+        raise ValueError("model publication receipt identifies the wrong repository")
     fit_refs = _upload_receipts(run_root / "artifacts/hf-upload/fits", "fit", args.layers)
     candidate_refs = _upload_receipts(
         run_root / "artifacts/hf-upload/candidates", "candidate", args.layers
@@ -281,6 +295,9 @@ def main() -> int:
         code_root / "environments/b200-cu132.lock.json": Path("software/b200-cu132.lock.json"),
         code_root / "environments/requirements-b200-cu132.txt": Path(
             "software/requirements-b200-cu132.txt"
+        ),
+        args.model_publication_receipt.resolve(): Path(
+            "publication/model-publication-receipt.json"
         ),
     }
     for source in sorted(kld_root.iterdir()):
@@ -337,6 +354,12 @@ def main() -> int:
         "allocation_sha256": allocation["allocation_sha256"],
         "kld_report_sha256": report["report_sha256"],
         "kld_summary": report["summary"],
+        "validation_model": {
+            "repo_id": model_publication["repo_id"],
+            "verified_revision": model_publication["verified_revision"],
+            "manifest_sha256": model_publication["manifest_sha256"],
+            "receipt_sha256": model_publication["receipt_sha256"],
+        },
     }
     manifest["manifest_sha256"] = _hash_json(manifest)
     write_json(output / "bundle-manifest.json", manifest)

@@ -3,16 +3,23 @@
 Auditable foundations for a calibration, attribution, allocation, encoding and
 validation pipeline for low-bit dense and MoE language models.
 
-## Status: reproducible implementation; real-Qwen/B200 result pending
+## Status: first full Qwen/B200 control measured and independently verified
 
 This repository now contains local implementations of the calibration fitter,
 canonical source-derived absolute-v31/GSS artifacts, exact-codec candidate
 ledger, fixed-cost allocator, causal campaign runner, Qwen routed capture,
 internal checkpoint assembly, upstream BTX writer/auditor, and independent KLD
-checks. These modules have local synthetic/tiny-model tests. They have **not**
-yet completed the required clean-node two-B200 real-Qwen campaign, real source
-artifact replay, final KLD, or SM100 runtime qualification. No quality or
-deployability improvement is claimed until those gates pass.
+checks. These modules have local synthetic/tiny-model tests. The first full
+48-layer two-B200 Qwen fixed-Hadamard K3/K4 control has now completed at an
+exact 3.5-bit MoE expert-weight rate. Its reconstructed-BF16 replay measured
+mean next-token KLD `0.06335949321311507` over 2,047 sealed WikiText positions.
+Every selected matrix payload and the token KLD were independently reverified.
+See the [complete result and provenance ledger](docs/QWEN_B200_CONTROL_RESULT.md).
+
+This is a validation-model result, not SM100 packed-runtime qualification. The
+published model stores the measured reconstructions in BF16 because the
+current official BTX format cannot express this control's independent gate/up
+choices. No CUDA-graph, throughput, or compact-checkpoint claim is made.
 
 The production example under `configs/qwen3-30b-a3b-b200` now names the
 in-repository concrete Qwen service factory. Machine-specific corrected-codec,
@@ -63,8 +70,9 @@ permutation controls crossed with the three historical scale families through
 canonical absolute-v31 and pinned K3/K4/K5 GSS; emits exact candidate payloads;
 keeps research and official-BTX-compatible allocation arms separate; and
 installs layers causally before pinned BTX emission/audit. These paths are
-implemented but remain unqualified on real Qwen/B200 hardware until the gates
-above pass.
+implemented. The fast fixed-Hadamard K3/K4 control is now qualified for
+reconstructed-BF16 KLD on real Qwen/B200 hardware; the full Shapley allocation
+and native BTX/runtime arms remain separate future gates.
 
 The native causal attribution producer is checked in. The candidate stage
 persists an explicit actual-codec provisional control and exact decoded-minus-
@@ -75,7 +83,8 @@ differentiable per-layer blends, measures next-token KL gradients, and projects
 exact routed expert residuals through score-function Fisher VJPs. Cross-expert
 and routing/backend residuals remain explicit. A tiny real PyTorch Qwen MoE
 fixture validates direction, closure, source control, non-identity permutations,
-and tamper failure. Real Qwen/B200 evidence remains pending.
+and tamper failure. The full native causal-attribution arm remains pending a
+real-Qwen comparison against the published fixed-Hadamard control.
 
 Reconstructed-BF16 re-anchor KLD and native-BTX final student KLD remain
 separate acceptance gates.
