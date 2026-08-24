@@ -14,10 +14,9 @@ Two different claims require two different controls.
    allocator-only ablation because a native mixed-bit conversion generates its
    candidates under its own progressive state.
 
-The existing `0.0292690766473` result proves that full ShapleyMCG allocation
-beats the predecessor allocation by 3.322359% inside the same reconstructed
-TurboDerp K3/K4 pool. It does not yet prove superiority over TurboDerp's own
-v0.0.1 carried-surplus allocation rule.
+The full ShapleyMCG allocation first beat the predecessor allocation by
+3.322359% inside the reconstructed TurboDerp K3/K4 pool. The subsequent strict
+v0.0.1-rule comparison below now establishes the allocator claim as well.
 
 ## TurboDerp v0.0.1 calibration and conversion audit
 
@@ -80,6 +79,19 @@ are top-1 agreement, per-row KLD, bootstrap confidence interval for the paired
 tokenwise KLD difference, and the count of rows favoring each arm. Superiority
 requires lower mean KLD and a paired interval excluding zero. This is the
 cleanest answer to whether the allocation method beats TurboDerp's allocation.
+
+**Measured result.** TurboDerp's v0.0.1 rule measured mean KLD
+`0.033941535180377104` and top-1 agreement `0.931201171875`. Full ShapleyMCG
+measured `0.029269076647285147` and `0.93720703125`, respectively. The KLD
+reduction is **13.766197%** and the top-1 gain is **0.600586 percentage
+points**. ShapleyMCG won all 10 rows. A 200,000-draw row-block bootstrap with
+seed 20260824 gave a 95% interval of
+`[0.0035278601966, 0.0059290927123]` for the absolute mean-KLD reduction, wholly
+above zero. The sealed comparison SHA-256 is
+`85376441fc6279a3d17549921f310d1247ee39810bcbf7fe8e3e8c35f602bc65`.
+
+This passes the allocator-superiority gate over common candidate bytes. It
+does not satisfy the separate native-mixed-checkpoint claim in experiment C.
 
 ### B. Calibration-data versus state-propagation factorial
 

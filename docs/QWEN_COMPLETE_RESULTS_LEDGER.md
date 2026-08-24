@@ -154,6 +154,30 @@ immutable Hugging Face revision
 `207dae73cc5afb178c152c81f013d8f622c5b3457bf93e2873d54cd87b484d76`,
 and `da7df48d444652bb32bf61d4a0f6d9831732c054c76443691a8f959aaf82fc75`.
 
+### TurboDerp v0.0.1 allocator isolation
+
+TurboDerp's original carried-surplus expert rule was reproduced from upstream
+revision `ae04741f22324cc746ab78c27365e53e3f9f1cf4`. On Qwen's equal-sized
+gate/up/down expert matrices it alternates K3/K3/K4 and K3/K4/K4 by layer,
+yielding the same exact 9,216 K3 plus 9,216 K4 matrix count as ShapleyMCG.
+
+| Allocation rule | Candidate pool | Mean KLD | Top-1 |
+|---|---|---:|---:|
+| TurboDerp v0.0.1 carried surplus | published TurboDerp K3/K4 reconstructions | 0.0339415351804 | 0.931201171875 |
+| **Full ShapleyMCG causal** | identical published TurboDerp K3/K4 reconstructions | **0.0292690766473** | **0.937207031250** |
+
+The fixed parent, panel, teacher files, K4 non-expert body, K6 head, checkpoint
+revisions, matrix count, and KLD arithmetic are sealed in the checked-in proof.
+ShapleyMCG lowers KLD by **13.766197%**, gains **0.600586 percentage points**
+of top-1 agreement, and wins all 10 rows. The seeded 200,000-draw row-block
+bootstrap interval for absolute KLD reduction is
+`[0.0035278602, 0.0059290927]`. Comparison seal:
+`85376441fc6279a3d17549921f310d1247ee39810bcbf7fe8e3e8c35f602bc65`.
+
+This establishes allocation-rule superiority on common reconstructed
+candidate bytes. It remains distinct from a whole-pipeline comparison against
+a native v0.0.1 3.5 checkpoint, which TurboDerp did not publish.
+
 ## External paper context
 
 Hill et al. report `0.0353` for their additive method and `0.0429` for their
@@ -177,13 +201,17 @@ only.
 - Established: the full causal allocation improves the unchanged TurboDerp
   K3/K4 candidate-pool arm by 3.322359%, so the allocation signal transfers to
   a second reconstruction pool.
+- Established: over that same published K3/K4 candidate pool and exact expert
+  rate, full ShapleyMCG beats TurboDerp v0.0.1's own carried-surplus allocation
+  by 13.766197%, with all 10 rows favorable and a positive row-block bootstrap
+  interval.
 - Established: the raw five-node attribution leaves a stable material
   remainder (29.77% post-trained; 30.42% Base), so exact end-to-end anchors are
   necessary and reconciliation must remain labeled accounting rather than raw
   additivity.
-- Not established: strict superiority to Hill et al., a win over a native
-  TurboDerp 3.5 model (none was published for this checkpoint), codec-only
-  superiority, or packed-runtime quality/parity.
+- Not established: strict superiority to Hill et al., a whole-pipeline win
+  over a native TurboDerp 3.5 model (none was published for this checkpoint),
+  codec-only superiority, or packed-runtime quality/parity.
 - Never measured: an interpolated K3/K4 midpoint is not a naive 3.5 result.
 
 Full logits, tokenwise KLD, candidate receipts, and hashes are stored in the two

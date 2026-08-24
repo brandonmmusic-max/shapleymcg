@@ -45,6 +45,19 @@ demonstrated improvement. The latter gap belongs to the complete encoding
 pipelines and cannot be attributed to MCG, calibration, scaling, rotations, or
 any other single component without another controlled experiment.
 
+TurboDerp v0.0.1's own carried-surplus expert allocation has now been
+reproduced over that same published K3/K4 candidate pool. At the identical
+9,216 K3 plus 9,216 K4 matrix count, fixed K4 body/K6 head, BF16 teacher,
+20,480-token panel, and evaluator, it measured KLD `0.033941535180377104`
+versus ShapleyMCG's `0.029269076647285147`. ShapleyMCG therefore reduced KLD
+by **13.766197%**, gained **0.600586 percentage points** of top-1 agreement,
+and won all 10 evaluation rows. A 200,000-draw seeded row-block bootstrap gave
+an absolute-KLD reduction interval of `[0.0035278602, 0.0059290927]`. This is
+an allocator-only win over TurboDerp's rule on common reconstructed candidate
+bytes; it is not a claim about a native TurboDerp 3.5 checkpoint, which was not
+published. The sealed comparison is under
+[`results/qwen3-30b-a3b-posttrained/turboderp-v001-allocation-proof`](results/qwen3-30b-a3b-posttrained/turboderp-v001-allocation-proof/comparison.json).
+
 ## Base-model causal allocation result
 
 The full two-level Aumann–Shapley/Fisher arm is now measured. At the identical
