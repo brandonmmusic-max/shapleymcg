@@ -122,6 +122,10 @@ def test_exact_turboderp_3p5_plan_is_matched_and_nonmutating(tmp_path):
         "turboderp-selected-k34",
         "hybrid-ours-selected-k34",
     ]
+    assert plan["codec_only_ablation"] is False
+    assert plan["native_turboderp_3p5_published"] is False
+    assert "independently produced reconstruction pools" in plan["comparison_kind"]
+    assert "procedural codebook selection" in plan["confounded_candidate_production_factors"]
     assert not output.exists()
 
 
@@ -406,3 +410,6 @@ def test_posttrained_result_bundle_seals_every_hub_layer(tmp_path):
     assert (output / "evaluation/matched-k4-comparison/summary.json").is_file()
     assert (output / "evaluation/matched-3p5-comparison/summary.json").is_file()
     assert (output / "evaluation/naive-3p5-controls/summary.json").is_file()
+    card = (output / "README.md").read_text()
+    assert "This is not a codec-only ablation" in card
+    assert "did not publish a native 3.5-BPW branch" in card

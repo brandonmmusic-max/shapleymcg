@@ -21,10 +21,11 @@ therefore comes from the reconstructed weights rather than runtime fusion.
 | Uniform K4 experts; K4 q/k/v/o; K6 head | 0.03776677825098351 | 0.02137210911467856 | 0.924755859375 | 0.94345703125 |
 
 At exact 3.5 expert BPW, the current full-body ShapleyMCG reconstruction has
-54.6961% higher KLD than the matched TurboDerp-codec arm. At uniform K4 it has
-76.7106% higher KLD. These are negative results and are reported as such.
+54.6961% higher KLD than the matched TurboDerp-checkpoint-reconstruction arm.
+At uniform K4 it has 76.7106% higher KLD. These are negative pipeline-level
+results and are reported as such.
 
-## What the ablation establishes
+## What the matched reconstructions establish
 
 Before attention quantization, the ShapleyMCG selected 3.5-BPW experts with
 source-BF16 attention measured `0.04112263218133531`. Replacing q/k/v/o with
@@ -32,12 +33,13 @@ ShapleyMCG K4 reconstructions increased KLD by 13.8889% to
 `0.046834114392727964`. The uniform-K4 expert arm similarly increased from
 `0.030848146342326514` to `0.03776677825098351`, or 22.4280%.
 
-This falsifies the narrow hypothesis that keeping the quantized body in one
-MCG-based encoding system would itself close the TurboDerp gap. The leading
-differences that remain are:
+This falsifies only the narrow whole-pipeline hypothesis that these R10/MCG
+reconstructions would close the gap to the published TurboDerp checkpoints.
+It is not a codec-only ablation. The arms also differ in:
 
-1. TurboDerp uses EXL3's default trellis codebook; the corrected-R10 candidate
-   path used here forces MCG.
+1. The May 2025 TurboDerp checkpoints use EXL3's legacy unmarked procedural
+   codebook, while the corrected-R10 candidate path explicitly forces the
+   later MCG-marked codebook.
 2. TurboDerp calibrates all experts with a 204,800-token corpus, whereas this
    run used 69,632 source tokens followed by each expert's routed subset.
 3. TurboDerp advances calibration state through already-quantized predecessor
@@ -46,11 +48,11 @@ differences that remain are:
 4. TurboDerp's automatic output-scale policy can decline a scale when Hessian
    skew makes it unsafe; this encoder always applies its richer scale scheme.
 
-The next causal experiment should retain the selected Shapley allocation while
-swapping these factors one at a time, starting with trellis versus MCG under
-identical Hessians and scaling. The already measured hybrid supports that
-priority: the selected allocation encoded with TurboDerp's codec measured
-`0.030274917976982833`.
+The next causal experiment must retain the selected Shapley allocation while
+swapping these factors one at a time under identical calibration, Hessians,
+rotations, scaling, and numeric policy. The already measured Turbo arm shows
+that the selected allocation works with the published K3/K4 candidate pool; it
+does not identify which encoding component caused the pipeline-level gap.
 
 ## Positive allocation claim
 
@@ -76,31 +78,52 @@ zero maximum difference.
 This establishes a matched improvement from the full allocator on the
 post-trained parent. It does not retroactively turn the earlier rows into
 full-method results, and it does not establish that MCG encoding beats the
-TurboDerp trellis codec.
+published TurboDerp reconstruction pipeline or establish codebook superiority.
 
-## Full causal allocation through both codecs
+## Full causal allocation through both reconstruction pools
 
-The causal allocation was then installed into both codecs while fixing the
-post-trained parent, sealed 20,480-position panel, TurboDerp K4 body/K6 head,
-and the exact 9,216 K3 plus 9,216 K4 expert-matrix count.
+The causal allocation was then installed into both reconstruction pools while
+fixing the post-trained parent, sealed 20,480-position panel, TurboDerp K4
+body/K6 head, and the exact 9,216 K3 plus 9,216 K4 expert-matrix count.
 
-| Expert codec | Predecessor allocation KLD | Causal allocation KLD | Causal top-1 |
+| Expert reconstruction source | Predecessor allocation KLD | Causal allocation KLD | Causal top-1 |
 |---|---:|---:|---:|
-| TurboDerp trellis | 0.0302749179770 | **0.0292690766473** | **0.937207031250** |
-| ShapleyMCG MCG | 0.0455629356710 | 0.0457931025429 | 0.918847656250 |
+| Published TurboDerp K3/K4 checkpoints | 0.0302749179770 | **0.0292690766473** | **0.937207031250** |
+| Independently encoded R10/MCG candidates | 0.0455629356710 | 0.0457931025429 | 0.918847656250 |
 
-The causal choices lower TurboDerp-codec KLD by **3.322359%** and improve
+The causal choices lower KLD within the unchanged TurboDerp candidate pool by
+**3.322359%** and improve
 top-1 agreement by **0.273438 percentage points**, proving that the allocation
 signal transfers beyond the MCG encoder. At the identical causal choices and
-body scope, however, MCG KLD is **56.455576% higher** than TurboDerp KLD. The
-MCG hybrid also regresses 0.505163% versus its predecessor-allocation hybrid.
+body scope, the independently encoded R10/MCG reconstruction has
+**56.455576% higher** KLD. That number is a whole-pipeline difference, not an
+estimate of MCG codebook damage. The R10/MCG hybrid also regresses 0.505163%
+versus its predecessor-allocation hybrid.
 That context reversal shows that expert allocation interacts with the
 quantized non-expert body: a source-BF16 allocation must be re-anchored before
 claiming the same ordering in a fully quantized body.
 
 The logical result is therefore two-part: the full causal allocator is a real
-improvement, while the current MCG codec/calibration path—not allocation—is the
-larger remaining quality bottleneck.
+improvement, while the separately encoded R10 pipeline needs controlled
+component ablations before its remaining quality loss can be assigned.
+
+TurboDerp did not publish a native 3.5-BPW branch for this checkpoint. Both
+exact-3.5 Turbo rows here are constructions made by selecting matrices from the
+published K3 and K4 checkpoints. Therefore `0.0292690766473` cleanly beats the
+predecessor allocation over the same candidate bytes; it is not yet a claimed
+win over a published TurboDerp 3.5 result.
+
+## Interpretation correction history
+
+- `c02f75d` introduced the exact-3.5 comparison with an over-narrow
+  “codec and reconstruction” description.
+- `2a6b013` documented the confounders but still framed the comparison as a
+  codec priority experiment.
+- `7ab4ba2` incorrectly promoted the pipeline-level gap into an MCG
+  codec/calibration bottleneck conclusion.
+
+The numeric measurements, hashes, and independent KLD replays remain valid.
+This correction narrows only the causal interpretation.
 
 ## Seals and lineage
 

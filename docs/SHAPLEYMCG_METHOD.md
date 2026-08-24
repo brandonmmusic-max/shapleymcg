@@ -145,9 +145,11 @@ serving throughput require separate parity and runtime gates.
   explicit remainder, causal-score calibration, and exact-rate allocation.
 - **ShapleyMCG codec**: the corrected MCG candidate encoder used in this study;
   this label alone says nothing about which allocator selected the candidates.
-- **TurboDerp codec arm**: the matched EXL3 trellis reconstruction used to
-  isolate codec/calibration effects. Credit belongs to turboderp and the
-  ExLlamaV3 contributors.
+- **TurboDerp checkpoint-reconstruction arm**: an exact-rate construction that
+  selects matrices from the published EXL3 K3 and K4 checkpoints. It tests the
+  allocator on a second fixed candidate pool; it does not isolate the codec or
+  calibration stack. Credit belongs to turboderp and the ExLlamaV3
+  contributors.
 
 ## 9. Claims that the present evidence can support
 

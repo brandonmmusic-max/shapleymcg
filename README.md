@@ -10,14 +10,16 @@ complete. Its candidates use the ShapleyMCG MCG encoder, but its exact-rate
 selection uses the historical diagonal routed-p2 Hessian/router allocator—not
 the full Aumann–Shapley/Fisher allocator. At exactly 3.5 logical bits per
 routed-expert weight, that predecessor allocation reduced
-KLD by 34.7513% versus five score-blind allocations, but its MCG-based encoder
-did not beat TurboDerp's EXL3 trellis encoder. Adding ShapleyMCG K4 attention
+KLD by 34.7513% versus five score-blind allocations, but its independently
+encoded R10/MCG reconstruction did not beat the reconstruction assembled from
+published TurboDerp checkpoints. Adding ShapleyMCG K4 attention
 increased KLD from `0.04112263218133531` to `0.046834114392727964`; the matched
-TurboDerp-codec arm measured `0.030274917976982833`. At uniform K4 the
-corresponding full-body values were `0.03776677825098351` and
-`0.02137210911467856`. These results isolate predecessor allocation quality
-from codec and calibration quality: the allocation result is positive, while the current
-encoder/calibration stack remains behind TurboDerp. See the
+TurboDerp-checkpoint-reconstruction arm measured `0.030274917976982833`. At
+uniform K4 the corresponding full-body values were `0.03776677825098351` and
+`0.02137210911467856`. These results establish allocation quality when the
+candidate reconstructions are held fixed. They do **not** isolate a codebook:
+the R10 arm also changes calibration tokens, Hessian state, rotations, scaling,
+and encoding policy relative to the published TurboDerp checkpoints. See the
 [matched comparison report](docs/QWEN_POSTTRAINED_TURBODERP_COMPARISON.md) and
 [compact sealed record](results/qwen3-30b-a3b-posttrained/fullscope-summary.json).
 
@@ -27,18 +29,21 @@ BPW, it lowered MCG KLD from the predecessor's `0.04112263218133531` to
 `0.040368551745534186`, a **1.833736% reduction**, while top-1 agreement rose
 by **0.141602 percentage points**. Independent float64 replay had zero maximum
 tokenwise difference. This is evidence for the complete allocation method; it
-does not erase the separately measured MCG-versus-TurboDerp codec gap. See the
+does not turn the separately encoded R10-versus-TurboDerp pipeline comparison
+into a codec-only ablation. See the
 [complete result ledger](docs/QWEN_COMPLETE_RESULTS_LEDGER.md).
 
-The causal choices also transfer to TurboDerp's unchanged expert codec: with
+The causal choices also transfer to TurboDerp's unchanged K3/K4 checkpoint
+reconstructions: with
 the same post-trained parent, 20,480-position panel, K4 body/K6 head, and exact
 3.5 expert rate, they lower KLD from `0.030274917976982833` to
 `0.029269076647285147` (**3.322359%**) and gain **0.273438 percentage points**
-of top-1 agreement. Holding those causal choices and the body fixed while
-swapping only the expert reconstruction gives MCG KLD `0.04579310254291688`,
-56.455576% higher than TurboDerp. The allocator is therefore a demonstrated
-improvement; the current MCG codec/calibration path is the larger remaining
-quality bottleneck.
+of top-1 agreement. Replacing those experts with reconstructions produced by
+the independently calibrated R10/MCG pipeline gives KLD
+`0.04579310254291688`, 56.455576% higher. The allocator is therefore a
+demonstrated improvement. The latter gap belongs to the complete encoding
+pipelines and cannot be attributed to MCG, calibration, scaling, rotations, or
+any other single component without another controlled experiment.
 
 ## Base-model causal allocation result
 

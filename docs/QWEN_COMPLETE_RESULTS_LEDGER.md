@@ -57,23 +57,24 @@ Parent revision: `Qwen/Qwen3-30B-A3B@4c446470ba0aec43e22ac1128f9ffd915f338ba3`.
 Panel: the same sealed 10 x 2,048 WikiText tokens and post-trained BF16 teacher.
 These published rows use eager Transformers BF16 replay with KV cache disabled.
 
-| Arm | Allocator | Expert codec/rate | Non-expert scope | Mean KLD | Top-1 |
+| Arm | Allocator | Expert reconstruction/rate | Non-expert scope | Mean KLD | Top-1 |
 |---|---|---|---|---:|---:|
 | Selected experts | predecessor routed-p2 | MCG, exact 3.5 | source BF16 | 0.0411226321813 | 0.924267578125 |
 | Uniform expert K4 | uniform | MCG, 4.0 | source BF16 | 0.0308481463423 | 0.935205078125 |
 | Score-blind 3.5, five-seed mean | score-blind | MCG, exact 3.5 | source BF16 | 0.0630244404829 | — |
 | Full-body MCG exact 3.5 | predecessor routed-p2 | MCG, exact 3.5 | MCG K4 q/k/v/o; TurboDerp K6 head | 0.0468341143927 | 0.916259765625 |
 | Full-body MCG uniform K4 | uniform | MCG, 4.0 | MCG K4 q/k/v/o; TurboDerp K6 head | 0.0377667782510 | 0.924755859375 |
-| Matched EXL3 exact 3.5 | same predecessor choices | TurboDerp trellis, exact 3.5 | TurboDerp K4 body/K6 head | 0.0302749179770 | 0.934472656250 |
-| TurboDerp full K4 | uniform | TurboDerp trellis, 4.0 | TurboDerp K4 body/K6 head | 0.0213721091147 | 0.943457031250 |
+| Matched EXL3 exact 3.5 | same predecessor choices | published TurboDerp K3/K4 pool, exact 3.5 | TurboDerp K4 body/K6 head | 0.0302749179770 | 0.934472656250 |
+| TurboDerp full K4 | uniform | published TurboDerp K4, 4.0 | TurboDerp K4 body/K6 head | 0.0213721091147 | 0.943457031250 |
 | TurboDerp dense + MCG K4 experts | uniform | MCG, 4.0 | TurboDerp K4 body/K6 head | 0.0356300732056 | 0.926611328125 |
 | TurboDerp dense + MCG exact-3.5 experts | predecessor routed-p2 | MCG, exact 3.5 | TurboDerp K4 body/K6 head | 0.0455629356710 | — |
 
-The predecessor allocation was 34.7513% below the five score-blind mean, but
-the matched codec swap favored TurboDerp: at the identical expert choices and
-dense scope, MCG KLD was 50.4973% higher. Adding MCG K4 attention also worsened
-the MCG predecessor arm. These results support a useful predecessor allocation
-signal while falsifying codec superiority.
+The predecessor allocation was 34.7513% below the five score-blind mean. At
+the identical expert choices and dense scope, the separately calibrated
+R10/MCG reconstruction had 50.4973% higher KLD than the published TurboDerp
+checkpoint reconstruction. This is a pipeline comparison, not a codec swap:
+calibration, Hessian state, rotations, scaling, and encoding policy also
+change. Adding R10/MCG K4 attention worsened that predecessor arm.
 
 ## Post-trained parent: full causal arm
 
@@ -109,26 +110,30 @@ Primary Hugging Face publication commit:
 verification receipt
 `95f701dd4bea586e97293dd26bfd158a6aef38f127664569a1830d640bb016d3`.
 
-### Causal-allocation codec transfer control
+### Causal-allocation candidate-pool transfer control
 
-The causal allocation was also replayed through both expert codecs with the
+The causal allocation was also replayed through both expert reconstruction
+pools with the
 same post-trained parent, sealed 20,480-position panel, TurboDerp K4 body/K6
 head, and exact 9,216 K3 / 9,216 K4 matrix count.
 
-| Arm | Allocation | Expert codec | Mean KLD | Top-1 |
+| Arm | Allocation | Expert reconstruction source | Mean KLD | Top-1 |
 |---|---|---|---:|---:|
-| Prior matched EXL3 control | predecessor routed-p2 | TurboDerp trellis | 0.0302749179770 | 0.934472656250 |
-| Causal matched EXL3 control | **full ShapleyMCG** | TurboDerp trellis | **0.0292690766473** | **0.937207031250** |
-| Prior matched MCG hybrid | predecessor routed-p2 | MCG | 0.0455629356710 | — |
-| Causal matched MCG hybrid | **full ShapleyMCG** | MCG | 0.0457931025429 | 0.918847656250 |
+| Prior matched EXL3 control | predecessor routed-p2 | published TurboDerp K3/K4 pool | 0.0302749179770 | 0.934472656250 |
+| Causal matched EXL3 control | **full ShapleyMCG** | published TurboDerp K3/K4 pool | **0.0292690766473** | **0.937207031250** |
+| Prior matched R10 hybrid | predecessor routed-p2 | independently encoded R10/MCG pool | 0.0455629356710 | — |
+| Causal matched R10 hybrid | **full ShapleyMCG** | independently encoded R10/MCG pool | 0.0457931025429 | 0.918847656250 |
 
-On TurboDerp's unchanged codec, the causal allocation lowers KLD by
+Within TurboDerp's unchanged candidate pool, the causal allocation lowers KLD by
 **3.322359%** and improves top-1 agreement by **0.273438 percentage points**.
-This demonstrates that the allocation improvement transfers to a second
-encoder and is not merely fitted to MCG reconstruction noise. With allocation
-and non-expert scope fixed, however, MCG KLD is **56.455576% higher** than
-TurboDerp KLD (equivalently, TurboDerp is 36.084093% lower). The MCG hybrid is
-also 0.505163% worse than its predecessor-allocation hybrid. The latter does
+This demonstrates that the allocation improvement transfers to those
+published reconstructions and is not merely fitted to R10 reconstruction
+noise. With allocation and non-expert scope fixed, however, the independently
+encoded R10/MCG pool has **56.455576% higher** KLD (equivalently, the
+TurboDerp-checkpoint arm is 36.084093% lower). Because the production paths
+also differ in calibration and transformation policy, this does not isolate
+the codebook. The R10 hybrid is also 0.505163% worse than its
+predecessor-allocation hybrid. The latter does
 not contradict the source-BF16 matched allocation win: it shows that quantizing
 the surrounding body changes expert/non-expert interactions enough to require
 allocation or re-anchoring in the final body context.
@@ -166,20 +171,19 @@ only.
   fixed candidates, bytes, parent, teacher, tokens, backend, and non-expert
   scope on both measured panels.
 - Established: on the post-trained parent, the predecessor allocation beats
-  five direct score-blind allocations, but the present MCG codec/calibration
-  stack loses to matched TurboDerp trellis reconstructions.
-- Established: the full causal allocation improves TurboDerp's unchanged
-  exact-3.5 codec arm by 3.322359%, so the allocation signal transfers across
-  codecs. At the same causal choices and body scope, the current MCG expert
-  reconstruction remains the dominant measured quality deficit.
+  five direct score-blind allocations. The independently encoded R10/MCG
+  pipeline loses to matched published TurboDerp reconstructions, but the
+  experiment does not identify which encoder component caused the gap.
+- Established: the full causal allocation improves the unchanged TurboDerp
+  K3/K4 candidate-pool arm by 3.322359%, so the allocation signal transfers to
+  a second reconstruction pool.
 - Established: the raw five-node attribution leaves a stable material
   remainder (29.77% post-trained; 30.42% Base), so exact end-to-end anchors are
   necessary and reconciliation must remain labeled accounting rather than raw
   additivity.
-- Not established: strict superiority to Hill et al. or packed-runtime
-  quality/parity. The matched post-trained allocation improvement is now
-  established, but it is modest and does not by itself establish codec
-  superiority.
+- Not established: strict superiority to Hill et al., a win over a native
+  TurboDerp 3.5 model (none was published for this checkpoint), codec-only
+  superiority, or packed-runtime quality/parity.
 - Never measured: an interpolated K3/K4 midpoint is not a naive 3.5 result.
 
 Full logits, tokenwise KLD, candidate receipts, and hashes are stored in the two

@@ -133,9 +133,11 @@ signal entered that choice. The final fit corpus therefore contains 34 windows.
 |---|---:|---:|
 {table}
 
-The strict component-attribution arm fixes TurboDerp dense K4/K6 components,
-router, evaluator, and panel, replacing only the expert reconstructions. Its
-relative KLD change versus the locally reconstructed TurboDerp arm is
+The matched expert-reconstruction arm fixes TurboDerp dense K4/K6 components,
+router, evaluator, panel, rate, and allocation. It replaces the published
+TurboDerp expert reconstructions with experts produced by a separately
+calibrated R10/MCG pipeline. Its relative KLD change versus the locally
+reconstructed TurboDerp arm is
 `{summary['matched_hybrid_kld_reduction_vs_turboderp']:.12g}` and its top-1
 change is `{summary['matched_hybrid_top1_gain_vs_turboderp']:.12g}`.
 
@@ -148,12 +150,17 @@ of five score-blind seeds beat it.
 
 The exact matched 3.5-BPW comparison fixes TurboDerp K4 non-expert weights,
 K6 head, parent, panel, and the same half-K3/half-K4 matrix allocation. The
-TurboDerp reconstruction measured KLD
+TurboDerp K3/K4 candidate pool measured KLD
 `{exact_3p5['arms']['turboderp-selected-k34']['mean_kld']:.12g}`; replacing
-only those expert reconstructions with ShapleyMCG measured
+those experts with independently produced R10/MCG reconstructions measured
 `{exact_3p5['arms']['hybrid-ours-selected-k34']['mean_kld']:.12g}`. The
-ShapleyMCG relative KLD reduction at identical expert rate is
+R10/MCG relative KLD reduction at identical expert rate is
 `{exact_3p5['ours_kld_reduction_vs_turboderp_at_exact_3p5']:.12g}`.
+
+This is not a codec-only ablation: calibration, Hessian state, rotations,
+scaling, codebook choice, and numeric encoder policy differ between the two
+candidate pools. TurboDerp did not publish a native 3.5-BPW branch for this
+checkpoint; the exact-3.5 Turbo arm is constructed from its K3 and K4 branches.
 
 The bundle includes source/corpus seals, BF16 teacher and student logits,
 per-token KLD arrays, all arm reports, five naive controls, capture manifests,

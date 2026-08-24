@@ -2,6 +2,19 @@
   "schema": "shapleymcg.qwen-complete-results-ledger.v1",
   "metric": "mean tokenwise KL(BF16 teacher || reconstructed student)",
   "rate_scope": "logical routed-expert weight BPW unless explicitly stated",
+  "interpretation": {
+    "turbo_exact_3p5_construction": "matrix choices from the published TurboDerp K3 and K4 checkpoints",
+    "native_turboderp_3p5_published": false,
+    "r10_vs_turbo_is_codec_isolation": false,
+    "confounded_factors": [
+      "calibration corpus and routed subsets",
+      "progressive versus source-BF16 Hessian state",
+      "rotation and scaling policy",
+      "procedural codebook selection",
+      "numeric encoder implementation"
+    ],
+    "valid_claim": "the full causal allocation lowers KLD within the unchanged TurboDerp K3/K4 candidate pool"
+  },
   "results": [
     {
       "id": "base-glm-predecessor",
@@ -204,6 +217,8 @@
         "hub_verification_sha256": "207dae73cc5afb178c152c81f013d8f622c5b3457bf93e2873d54cd87b484d76"
       },
       "codec_isolation": {
+        "historical_path_label_only": true,
+        "scientific_interpretation": "whole-pipeline reconstruction comparison; not a codec-only ablation",
         "files": 28,
         "bytes": 24893537827,
         "manifest_sha256": "748555cb42377c08edef86a2248ccc211f3e2698c1bc57d0345ad304e9d78638",

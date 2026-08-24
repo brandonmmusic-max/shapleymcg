@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Measure an exact TurboDerp-vs-ShapleyMCG 3.5 expert-BPW control.
+"""Measure an exact TurboDerp-pool-vs-R10-pool 3.5 expert-BPW control.
 
 Both arms use TurboDerp K4 attention/dense weights and its K6 head.  Both use
-the same sealed half-K3/half-K4 matrix allocation.  Only the expert codec and
-reconstruction change, making the comparison matched at the routed-expert
-rate rather than comparing our 3.5 BPW result to a uniform K4 checkpoint.
+the same sealed half-K3/half-K4 matrix allocation.  One expert arm selects
+reconstructions from TurboDerp's published K3/K4 checkpoints; the other uses
+separately calibrated and encoded R10/MCG candidates.  This matches parent,
+rate, allocation, non-expert weights, panel, and evaluator, but it does not
+isolate a codebook because the candidate-production pipelines also differ in
+calibration state, Hessians, rotations, scaling, and numeric encoder policy.
 """
 
 from __future__ import annotations
@@ -150,6 +153,16 @@ def main() -> int:
         "expert_rate": "exact half K3 / half K4 = 3.5 logical BPW",
         "fixed_nonexpert_scope": "TurboDerp K4 body and K6 head",
         "arms": ["turboderp-selected-k34", "hybrid-ours-selected-k34"],
+        "comparison_kind": "matched allocation across independently produced reconstruction pools",
+        "codec_only_ablation": False,
+        "native_turboderp_3p5_published": False,
+        "confounded_candidate_production_factors": [
+            "calibration corpus and routed subsets",
+            "progressive versus source-BF16 Hessian state",
+            "rotation and scaling policy",
+            "procedural codebook selection",
+            "numeric encoder implementation",
+        ],
         "dry_run": not args.execute,
     }
     print(json.dumps(plan, sort_keys=True), flush=True)
