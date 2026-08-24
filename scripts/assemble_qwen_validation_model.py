@@ -10,12 +10,14 @@ used for KLD validation, not a compact or runtime-qualified 3.5-bpw checkpoint.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+from threading import Lock
 import time
 
 from quant_pipeline.core.artifacts import canonical_json, sha256_bytes, sha256_file, write_json
@@ -70,6 +72,69 @@ def _candidate_key(choice: dict) -> str:
     return (
         f"K{int(choice['bits'])}.E{int(choice['expert']):03d}."
         f"{choice['projection']}.reconstruction_hf"
+    )
+
+
+def _resolve_candidate_files(
+    *,
+    layers: list[int],
+    encode_root: Path,
+    expected_sha256: dict[int, str],
+    hf_repo: str | None,
+    hf_revision: str | None,
+    download_root: Path | None,
+    workers: int,
+) -> tuple[dict[int, Path], list[Path]]:
+    """Resolve sealed layer candidates, downloading only absent layers.
+
+    Downloads use ``local_dir`` rather than the global Hub cache so the caller
+    can reclaim the exact temporary payload after its output shard is sealed.
+    """
+
+    created: list[Path] = []
+    created_lock = Lock()
+
+    def resolve(layer: int) -> tuple[int, Path, bool]:
+        path = encode_root / f"layer-{layer:03d}" / "k34-candidates.safetensors"
+        downloaded = False
+        if not path.is_file():
+            if not hf_repo or not hf_revision or download_root is None:
+                raise FileNotFoundError(path)
+            from huggingface_hub import hf_hub_download
+
+            relative = f"candidates/layer-{layer:03d}/k34-candidates.safetensors"
+            path = Path(
+                hf_hub_download(
+                    repo_id=hf_repo,
+                    filename=relative,
+                    repo_type="dataset",
+                    revision=hf_revision,
+                    local_dir=download_root,
+                )
+            )
+            downloaded = True
+            with created_lock:
+                created.append(path)
+        observed = sha256_file(path)
+        if observed != expected_sha256[layer]:
+            if downloaded:
+                path.unlink(missing_ok=True)
+            raise ValueError(
+                f"candidate file identity mismatch for layer {layer}: "
+                f"{observed} != {expected_sha256[layer]}"
+            )
+        return layer, path, downloaded
+
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, min(workers, len(layers)))) as pool:
+            rows = list(pool.map(resolve, layers))
+    except Exception:
+        for path in created:
+            path.unlink(missing_ok=True)
+        raise
+    return (
+        {layer: path for layer, path, _ in rows},
+        created,
     )
 
 
@@ -383,6 +448,10 @@ def main() -> int:
     parser.add_argument("--panel-control-report", type=Path, required=True)
     parser.add_argument("--panel-verification", type=Path, required=True)
     parser.add_argument("--panel-control-verification", type=Path, required=True)
+    parser.add_argument("--candidate-hf-repo")
+    parser.add_argument("--candidate-hf-revision")
+    parser.add_argument("--candidate-download-root", type=Path)
+    parser.add_argument("--candidate-download-workers", type=int, default=4)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--attention-backend", default="eager")
     parser.add_argument("--execute", action="store_true")
@@ -406,6 +475,14 @@ def main() -> int:
         "panel_verification_file_sha256": sha256_file(args.panel_verification),
         "panel_control_verification": str(args.panel_control_verification.resolve()),
         "panel_control_verification_file_sha256": sha256_file(args.panel_control_verification),
+        "candidate_hf_repo": args.candidate_hf_repo,
+        "candidate_hf_revision": args.candidate_hf_revision,
+        "candidate_download_root": (
+            str(args.candidate_download_root.resolve())
+            if args.candidate_download_root
+            else None
+        ),
+        "candidate_download_workers": args.candidate_download_workers,
         "output": str(args.output.resolve()),
         "attention_backend": args.attention_backend,
         "dry_run": not args.execute,
@@ -431,6 +508,12 @@ def main() -> int:
     output.mkdir(parents=True)
     write_json(output / "assembly-plan.json", plan | {"dry_run": False})
     allocation, report, verification, choices = _load_inputs(kld_root)
+    expected_candidate_sha256 = {
+        int(row["layer"]): str(row["candidate_file_sha256"])
+        for row in report.get("installed_layers", ())
+    }
+    if set(expected_candidate_sha256) != set(range(48)):
+        raise ValueError("KLD report does not bind all 48 candidate layer files")
     (
         comparison,
         panel_comparison,
@@ -466,44 +549,70 @@ def main() -> int:
         output_shard = output / shard_name
         shard_keys = sorted(key for key, value in weight_map.items() if value == shard_name)
         layers = sorted({int(EXPERT_KEY.fullmatch(key)[1]) for key in shard_keys if EXPERT_KEY.fullmatch(key)})
-        tensors = {}
-        with ExitStack() as stack:
-            candidate_handles = {
-                layer: stack.enter_context(
-                    safe_open(
-                        encode_root / f"layer-{layer:03d}" / "k34-candidates.safetensors",
-                        framework="pt",
-                        device="cpu",
+        candidate_paths, downloaded_candidates = _resolve_candidate_files(
+            layers=layers,
+            encode_root=encode_root,
+            expected_sha256=expected_candidate_sha256,
+            hf_repo=args.candidate_hf_repo,
+            hf_revision=args.candidate_hf_revision,
+            download_root=(
+                args.candidate_download_root.resolve()
+                if args.candidate_download_root
+                else None
+            ),
+            workers=args.candidate_download_workers,
+        )
+        try:
+            tensors = {}
+            with ExitStack() as stack:
+                candidate_handles = {
+                    layer: stack.enter_context(
+                        safe_open(candidate_paths[layer], framework="pt", device="cpu")
                     )
+                    for layer in layers
+                }
+                source_handle = stack.enter_context(
+                    safe_open(source_shard, framework="pt", device="cpu")
                 )
-                for layer in layers
-            }
-            source_handle = stack.enter_context(safe_open(source_shard, framework="pt", device="cpu"))
-            if set(source_handle.keys()) != set(shard_keys):
-                raise ValueError(f"source index/key mismatch in {shard_name}")
-            metadata = source_handle.metadata()
-            for key in shard_keys:
-                choice = replacement_keys.get(key)
-                if choice is None:
-                    tensors[key] = source_handle.get_tensor(key)
-                    continue
-                match = EXPERT_KEY.fullmatch(key)
-                assert match is not None
-                tensor = candidate_handles[int(match[1])].get_tensor(_candidate_key(choice)).contiguous()
-                if tensor.dtype != torch.bfloat16 or tensor_sha256(tensor) != choice["stored_bf16_reconstruction_sha256"]:
-                    raise ValueError(f"selected reconstruction identity mismatch for {key}")
-                tensors[key] = tensor
-                replacement_count += 1
-            temporary = output_shard.with_suffix(output_shard.suffix + ".partial")
-            save_file(tensors, temporary, metadata=metadata)
-            os.replace(temporary, output_shard)
-        del tensors
-        with safe_open(output_shard, framework="pt", device="cpu") as check:
-            if set(check.keys()) != set(shard_keys):
-                raise ValueError(f"output key mismatch in {shard_name}")
-            for key in set(shard_keys) & set(replacement_keys):
-                if tensor_sha256(check.get_tensor(key)) != replacement_keys[key]["stored_bf16_reconstruction_sha256"]:
-                    raise ValueError(f"persisted reconstruction mismatch for {key}")
+                if set(source_handle.keys()) != set(shard_keys):
+                    raise ValueError(f"source index/key mismatch in {shard_name}")
+                metadata = source_handle.metadata()
+                for key in shard_keys:
+                    choice = replacement_keys.get(key)
+                    if choice is None:
+                        tensors[key] = source_handle.get_tensor(key)
+                        continue
+                    match = EXPERT_KEY.fullmatch(key)
+                    assert match is not None
+                    tensor = candidate_handles[int(match[1])].get_tensor(
+                        _candidate_key(choice)
+                    ).contiguous()
+                    if (
+                        tensor.dtype != torch.bfloat16
+                        or tensor_sha256(tensor)
+                        != choice["stored_bf16_reconstruction_sha256"]
+                    ):
+                        raise ValueError(
+                            f"selected reconstruction identity mismatch for {key}"
+                        )
+                    tensors[key] = tensor
+                    replacement_count += 1
+                temporary = output_shard.with_suffix(output_shard.suffix + ".partial")
+                save_file(tensors, temporary, metadata=metadata)
+                os.replace(temporary, output_shard)
+            del tensors
+            with safe_open(output_shard, framework="pt", device="cpu") as check:
+                if set(check.keys()) != set(shard_keys):
+                    raise ValueError(f"output key mismatch in {shard_name}")
+                for key in set(shard_keys) & set(replacement_keys):
+                    if (
+                        tensor_sha256(check.get_tensor(key))
+                        != replacement_keys[key]["stored_bf16_reconstruction_sha256"]
+                    ):
+                        raise ValueError(f"persisted reconstruction mismatch for {key}")
+        finally:
+            for path in downloaded_candidates:
+                path.unlink(missing_ok=True)
         shard_records.append({"path": shard_name, "bytes": output_shard.stat().st_size, "sha256": sha256_file(output_shard)})
         print(json.dumps({"stage": "shard", "shard": shard_name, "replacements": replacement_count}), flush=True)
     if replacement_count != len(choices):

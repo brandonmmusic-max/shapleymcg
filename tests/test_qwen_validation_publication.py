@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import sys
+import types
 
 import pytest
 
@@ -180,3 +182,38 @@ def test_model_card_reports_causal_and_panel_effects(tmp_path: Path) -> None:
     assert "13.4615%" in card
     assert "Transformers SDPA" in card
     assert "exact expanded BF16 validation model" in card
+
+
+def test_candidate_resolver_downloads_missing_hash_bound_layers(
+    tmp_path: Path, monkeypatch
+) -> None:
+    payloads = {18: b"layer-18", 19: b"layer-19"}
+    fake_hub = types.ModuleType("huggingface_hub")
+
+    def fake_download(*, filename: str, local_dir: Path, **_: object) -> str:
+        layer = int(filename.split("/")[1].split("-")[1])
+        path = Path(local_dir) / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payloads[layer])
+        return str(path)
+
+    fake_hub.hf_hub_download = fake_download
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hub)
+    paths, downloaded = ASSEMBLER._resolve_candidate_files(
+        layers=[18, 19],
+        encode_root=tmp_path / "local",
+        expected_sha256={layer: sha256_bytes(data) for layer, data in payloads.items()},
+        hf_repo="owner/repo",
+        hf_revision="immutable-revision",
+        download_root=tmp_path / "downloads",
+        workers=2,
+    )
+    assert [paths[layer].read_bytes() for layer in (18, 19)] == [
+        payloads[18],
+        payloads[19],
+    ]
+    assert set(downloaded) == set(paths.values())
+
+    for path in downloaded:
+        path.unlink()
+    assert not any(path.exists() for path in downloaded)
