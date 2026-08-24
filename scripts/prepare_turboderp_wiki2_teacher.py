@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -12,7 +13,21 @@ import time
 import numpy as np
 
 from measure_turboderp_wiki2_kld import _capture, _hash_json, _load_model, _prepare_panel
-from quant_pipeline.core.artifacts import sha256_file, write_json
+from quant_pipeline.core.artifacts import canonical_json, sha256_file, write_json
+
+
+def _verify_source_receipt(source: dict, model_revision: str) -> tuple[str, str]:
+    if source.get("revision") != model_revision:
+        raise ValueError("teacher source receipt revision mismatch")
+    expected = source.get("receipt_sha256")
+    body = {key: value for key, value in source.items() if key != "receipt_sha256"}
+    current = _hash_json(body)
+    legacy = hashlib.sha256(canonical_json(body).removesuffix(b"\n")).hexdigest()
+    if expected == current:
+        return str(expected), "canonical-json-with-trailing-newline"
+    if expected == legacy:
+        return str(expected), "legacy-canonical-json-without-trailing-newline"
+    raise ValueError("teacher source receipt seal mismatch")
 
 
 def main() -> int:
@@ -46,11 +61,7 @@ def main() -> int:
     import torch
 
     source = json.loads(args.source_receipt.read_text())
-    source_seal = source.get("receipt_sha256")
-    if source.get("revision") != args.model_revision or source_seal != _hash_json(
-        {key: value for key, value in source.items() if key != "receipt_sha256"}
-    ):
-        raise ValueError("teacher source receipt revision or seal mismatch")
+    source_seal, source_seal_scheme = _verify_source_receipt(source, args.model_revision)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     started = time.monotonic()
@@ -91,6 +102,7 @@ def main() -> int:
         "model_revision": args.model_revision,
         "attention_backend": args.attention_backend,
         "source_receipt_sha256": source_seal,
+        "source_receipt_seal_scheme": source_seal_scheme,
         "source_receipt_file_sha256": sha256_file(args.source_receipt),
         "panel_sha256": panel["panel_sha256"],
         "teacher_files": [

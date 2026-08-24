@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import runpy
@@ -258,6 +259,19 @@ def test_posttrained_teacher_capture_defaults_to_dry_run(tmp_path):
     assert plan["row_length"] == 2048
     assert plan["existing_panel_root"] is None
     assert not output.exists()
+
+
+def test_posttrained_teacher_accepts_and_labels_legacy_source_seal(monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    namespace = runpy.run_path(str(ROOT / "scripts/prepare_turboderp_wiki2_teacher.py"))
+    revision = "4c446470ba0aec43e22ac1128f9ffd915f338ba3"
+    body = {"schema": "source.v1", "revision": revision, "files": {}}
+    legacy = hashlib.sha256(canonical_json(body).removesuffix(b"\n")).hexdigest()
+    seal, scheme = namespace["_verify_source_receipt"](
+        {**body, "receipt_sha256": legacy}, revision
+    )
+    assert seal == legacy
+    assert scheme == "legacy-canonical-json-without-trailing-newline"
 
 
 def test_posttrained_result_bundle_seals_every_hub_layer(tmp_path):
