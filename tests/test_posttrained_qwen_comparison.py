@@ -256,6 +256,7 @@ def test_posttrained_teacher_capture_defaults_to_dry_run(tmp_path):
     assert plan["dry_run"] is True
     assert plan["rows"] == 10
     assert plan["row_length"] == 2048
+    assert plan["existing_panel_root"] is None
     assert not output.exists()
 
 
