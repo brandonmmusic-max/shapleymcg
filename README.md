@@ -50,7 +50,11 @@ Implemented now:
 - canonical absolute-v31 plus pinned K3/K4/K5 GSS candidate artifacts;
 - exact candidate payload/accounting ledgers and Qwen internal/official BTX emission;
 - packed-shard manifests, hashes, reconstruction and audits; and
-- guarded GPU/model commands requiring explicit `--execute`.
+- guarded GPU/model commands requiring explicit `--execute`;
+- independently hash-verified incremental Hugging Face publication of fitted
+  Hessian and exact candidate layers; and
+- a fail-closed Qwen control-bundle sealer that requires all 48 encode exits,
+  exact KLD, and all remote layer receipts before publication.
 
 The concrete service factory captures independent fit, held-out, conditional
 down-fit, and optional supplemental streams; fits direct routed raw second

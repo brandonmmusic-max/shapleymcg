@@ -128,6 +128,13 @@ bundle. Report proxy predictions and explicit closure remainders separately
 from measured KLD. A failed or unexecuted gate stays visible rather than being
 converted into a success claim.
 
+The Qwen fixed-Hadamard control uses
+`scripts/upload_qwen_incremental_hf.py` for fitted Hessian layers,
+`scripts/upload_qwen_candidates_hf.py` for exact K3/K4 candidates, and
+`scripts/seal_qwen_control_bundle.py` for the final closure. Candidate deletion
+is rejected until a zero-valued exact-KLD exit receipt exists. The final sealer
+rejects any missing layer, upload receipt, allocation seal, or KLD seal.
+
 ## Command skeleton
 
 The commands below demonstrate individual primitives. For the integrated
