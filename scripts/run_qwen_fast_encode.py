@@ -36,15 +36,31 @@ def _hash_json(value) -> str:
     return sha256_bytes(canonical_json(value))
 
 
-def _source_identity(path: Path) -> tuple[str, str]:
+def _source_identity(path: Path) -> tuple[str, str, str]:
     receipt = json.loads(path.read_text())
     seal = receipt.get("receipt_sha256")
-    if seal != _hash_json({key: value for key, value in receipt.items() if key != "receipt_sha256"}):
+    body = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
+    canonical = _hash_json(body)
+    legacy = sha256_bytes(json.dumps(
+        body,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode())
+    if seal == canonical:
+        seal_format = "canonical-json-with-trailing-newline"
+    elif receipt.get("schema") == "quant-pipeline.qwen-source-receipt.v1" and seal == legacy:
+        # Receipts produced before commit 5743240 used the identical canonical
+        # object without the package-wide trailing newline. Preserve that
+        # historical identity explicitly; do not accept any other mismatch.
+        seal_format = "legacy-v1-canonical-json-without-trailing-newline"
+    else:
         raise ValueError("source-checkpoint receipt seal mismatch")
     revision = str(receipt.get("revision", ""))
     if not revision:
         raise ValueError("source-checkpoint receipt omits revision")
-    return str(seal), revision
+    return str(seal), revision, seal_format
 
 
 def _matrix_vectors(value):
@@ -75,12 +91,15 @@ def main() -> int:
         parser.error("--layer must be in [0, 47]")
     fit_path = args.fit_root.resolve() / f"layer-{args.layer:03d}" / "fit-manifest.json"
     output = args.output.resolve()
-    source_identity, model_revision = _source_identity(args.source_receipt.resolve())
+    source_identity, model_revision, source_receipt_seal_format = _source_identity(
+        args.source_receipt.resolve()
+    )
     plan = {
         "schema": "quant-pipeline.qwen-fast-k34-encode-plan.v1",
         "model": str(args.model.resolve()),
         "model_revision": model_revision,
         "source_checkpoint_identity": source_identity,
+        "source_receipt_seal_format": source_receipt_seal_format,
         "source_receipt_sha256": sha256_file(args.source_receipt),
         "fit_manifest": str(fit_path),
         "fit_manifest_sha256": sha256_file(fit_path),
