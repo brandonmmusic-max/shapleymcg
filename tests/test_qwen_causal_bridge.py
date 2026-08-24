@@ -125,3 +125,21 @@ def test_panel_allocation_plan_binds_teacher_receipt_and_defaults_to_sdpa(tmp_pa
     assert plan["attention_backend"] == "sdpa"
     assert plan["teacher_receipt_file_sha256"]
     assert not output.exists()
+
+
+def test_causal_control_comparison_requires_exact_3p5_choices():
+    module = _script("compare_qwen_mcg_causal_control.py")
+    rows = []
+    for layer in range(48):
+        for expert in range(128):
+            for projection_index, projection in enumerate(("gate_proj", "up_proj", "down_proj")):
+                ordinal = (layer * 128 + expert) * 3 + projection_index
+                rows.append({
+                    "layer": layer,
+                    "expert": expert,
+                    "projection": projection,
+                    "bits": 3 if ordinal < 9216 else 4,
+                })
+    choices = module._choice_map({"choices": rows})
+    assert len(choices) == 18432
+    assert sum(bit == 3 for bit in choices.values()) == 9216
