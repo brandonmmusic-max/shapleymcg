@@ -26,7 +26,7 @@ the expanded validation reconstruction to a compact runtime checkpoint.
 ### Reproducibility dataset
 
 - Repository: `brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility`
-- Audited repository head: `e4d8a67ddb1f0b4c7605c5efcdc3c54e87e22b9f`
+- Audited repository head: `e873cd73543ac4b753f4c3571221f10eec38a1b6`
 - Fixed control folder revision: `c9c2b001dd943b8251fc0102ec76ab1b8d572219`
 - Remote control folder: 53 files, 2,715,887,831 bytes
 - Manifest inventory: 52 files; every row rechecked against remote size and
@@ -39,7 +39,8 @@ the expanded validation reconstruction to a compact runtime checkpoint.
   `b0af2ce0c0af3bafd1b8e5a101269a1c91fdf2f9d2cce105321b63b3ee130895`
 - Per-layer receipts: 48 fit plus 48 candidate receipts; all internal seals,
   layer identities, repository paths, byte counts, and bundle references match
-- Causal evidence repository head: `a1f669e5b42f041fa28017670fd86b183f5103d0`
+- Causal evidence content revision: `a1f669e5b42f041fa28017670fd86b183f5103d0`
+- Final dataset-card revision: `e873cd73543ac4b753f4c3571221f10eec38a1b6`
 - Matched causal/control 20k comparison seal:
   `8d8438df03d0f9a34a4a5a79912dd232baa401f24d8e6e14bb942bf00062a608`
 
@@ -47,12 +48,23 @@ the expanded validation reconstruction to a compact runtime checkpoint.
 
 - Repository:
   `brandonmusic/Qwen3-30B-A3B-ShapleyMCG-K34-Validation-Reconstruction`
-- Verified revision: `cfb34123f77edda0a1daa3881c48992c5b2db7ac`
-- Remote inventory: 31 files, 61,079,795,251 bytes
-- Model manifest inventory: 30 files; all rows rechecked against remote size
-  and either Hub LFS SHA-256 or a fresh-download SHA-256
+- Manifest-verified content revision:
+  `c3447f3f8e231ae83afa10ba263346d1ceb98c11`
+- Publication-receipt revision:
+  `fbdd05904fd4018dea9fd0f25ed4800c15df1493`
+- Verified content inventory: 31 files, 61,079,798,645 bytes
+- Model manifest inventory: 30 payload files plus the manifest; every row was
+  rechecked against remote size and either Hub LFS SHA-256 or Git-blob SHA-1
 - Model manifest seal:
-  `9f454affeae42392a928e50c1bdf704c3db871012733f2310548d6c02ffc2134`
+  `32fec13a96c6c85eb394939a6eb511c821bd05e8ac0960268852d33150d0cde1`
+- Publication receipt seal:
+  `e7b3b344321c11e872fc006cbd009c935b9fdbf0fdb8b2b0a99197cce14bffe8`
+- Publication receipt file SHA-256:
+  `778670c94a6db7d8147d3ee4757064fe3dcf586dfee22765917074be9f8c462a`
+- Post-assembly model-logit verification seal:
+  `247179326b2dd6b0f904d1ca976e4086920c0b3ce4a3b2421e481b51e822e717`
+- The reloaded checkpoint's 2,047-position logit tensor matched the measured
+  causal student bit-for-bit (`max_abs_delta = 0`).
 
 ## Corpus and evaluation seals
 

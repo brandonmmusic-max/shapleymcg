@@ -276,5 +276,13 @@ checkpoint and is labeled accordingly, not advertised as compact 3.5 bpw.
 - Exact expanded validation model:
   [`brandonmusic/Qwen3-30B-A3B-ShapleyMCG-K34-Validation-Reconstruction`](https://huggingface.co/brandonmusic/Qwen3-30B-A3B-ShapleyMCG-K34-Validation-Reconstruction)
 
-The final publication receipts record immutable verified revisions, total
-bytes, and size plus LFS-SHA256/Git-blob verification for every uploaded file.
+The selected causal reconstruction is sealed at model revision
+`c3447f3f8e231ae83afa10ba263346d1ceb98c11`; its publication receipt is at
+`fbdd05904fd4018dea9fd0f25ed4800c15df1493`. The manifest seal is
+`32fec13a96c6c85eb394939a6eb511c821bd05e8ac0960268852d33150d0cde1`
+and the receipt seal is
+`e7b3b344321c11e872fc006cbd009c935b9fdbf0fdb8b2b0a99197cce14bffe8`.
+The receipt verifies 31 files totaling 61,079,798,645 bytes by remote size plus
+LFS SHA-256 or Git-blob SHA-1. Reloading that assembled model reproduced the
+sealed 2,047-position student logits with exact tensor equality and zero
+maximum absolute delta.

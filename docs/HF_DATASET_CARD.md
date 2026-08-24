@@ -53,6 +53,29 @@ The full causal evidence is under `causal-arm-v3/`. Teacher and both allocation
 arms' panel logits, reports, per-token vectors, independent verifiers,
 attribution/reconciliation artifacts, and retention receipts are preserved.
 
+## Verified validation model publication
+
+The exact expanded validation reconstruction is published at
+[`brandonmusic/Qwen3-30B-A3B-ShapleyMCG-K34-Validation-Reconstruction`](https://huggingface.co/brandonmusic/Qwen3-30B-A3B-ShapleyMCG-K34-Validation-Reconstruction).
+
+- Manifest-verified model revision:
+  `c3447f3f8e231ae83afa10ba263346d1ceb98c11`
+- Publication-receipt revision:
+  `fbdd05904fd4018dea9fd0f25ed4800c15df1493`
+- Model manifest seal:
+  `32fec13a96c6c85eb394939a6eb511c821bd05e8ac0960268852d33150d0cde1`
+- Publication receipt seal:
+  `e7b3b344321c11e872fc006cbd009c935b9fdbf0fdb8b2b0a99197cce14bffe8`
+- Verified content inventory: 31 files and 61,079,798,645 bytes; every file
+  matched its remote size and either Hub LFS SHA-256 or Git-blob SHA-1.
+- Post-assembly verification: all 18,432 selected expert-matrix
+  reconstructions were installed, and the reloaded checkpoint reproduced the
+  sealed 2,047-position student logit tensor exactly (`max_abs_delta = 0`).
+
+The receipt describes and verifies the immutable model revision above. The
+repository head may advance for documentation without changing that sealed
+content revision.
+
 ## Historical fixed-Hadamard control
 
 The first 48-layer corrected-R10 K3/K4 control remains preserved as a separate

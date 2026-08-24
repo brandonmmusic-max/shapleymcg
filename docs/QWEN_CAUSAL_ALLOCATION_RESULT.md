@@ -101,10 +101,34 @@ accounting.
   `752e83112522f1f8bfe2cbf7797196cc7961164b7617ccb22d92f7e60c8a1911`
 - Dataset:
   [`brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility`](https://huggingface.co/datasets/brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility)
+- Manifest-verified validation model revision:
+  `c3447f3f8e231ae83afa10ba263346d1ceb98c11`
+- Validation-model publication-receipt revision:
+  `fbdd05904fd4018dea9fd0f25ed4800c15df1493`
+- Model manifest / publication receipt seals:
+  `32fec13a96c6c85eb394939a6eb511c821bd05e8ac0960268852d33150d0cde1` /
+  `e7b3b344321c11e872fc006cbd009c935b9fdbf0fdb8b2b0a99197cce14bffe8`
 
 The validation model is an expanded BF16 reconstruction of the selected MCG
 weights, not a compact 3.5-bpw runtime checkpoint. Packed-runtime and throughput
 qualification remain separate from the allocation-quality result.
+
+`scripts/assemble_qwen_validation_model.py` supports clean-node reconstruction
+after incremental candidate reclamation. When a local `layer-NNN` candidate is
+absent, `--candidate-hf-repo`, `--candidate-hf-revision`, and
+`--candidate-download-root` restore only the layers needed by the current model
+shard. Every restored file must match the candidate-file SHA256 bound by the
+measured KLD report; every selected tensor and persisted model tensor is checked
+again, and only the temporary restored copy is removed after that shard is
+sealed. The final checkpoint is reloaded with SDPA and must reproduce the
+measured student logit tensor exactly.
+
+The completed assembly installed all 18,432 selected expert-matrix
+reconstructions. Reloading the published checkpoint reproduced the sealed
+2,047-position student logits bit-for-bit: both raw tensor SHA-256 values are
+`548e4f67db7a9e1b085db655cdfa280ba0fee98b6821187e3b6ddfd23e1f19b0`
+and `max_abs_delta` is exactly zero. The manifest-verified remote inventory is
+31 files totaling 61,079,798,645 bytes.
 
 ## Attribution
 
