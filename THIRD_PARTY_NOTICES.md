@@ -1,8 +1,8 @@
 # Third-party acknowledgements
 
-This repository is an independent research implementation. It does not vendor
-code from the projects below, but its design and intended experiments build on
-their work.
+This repository is an independent research implementation. It does not
+wholesale-vendor the projects below, but its design and intended experiments
+build on their work. The BTX writer is the disclosed derived exception.
 
 - Robert J. Aumann and Lloyd S. Shapley for the Aumann-Shapley value.
 - Joshua Hill and NVIDIA Model Optimizer PR #2183 for Aumann-Shapley
@@ -17,7 +17,9 @@ their work.
   identified precisely in `docs/REFERENCES.md`.
 - Luke Alonso and Local Inference Lab contributors for B12X, the vLLM fork,
   and local runtime research. The official BTX writer ports atom assembly from
-  B12X `btx_synth.py` at the pinned commit; that upstream code is Apache-2.0.
+  B12X `btx_synth.py` at the pinned commit; that module is marked Apache-2.0
+  and the complete upstream license is preserved in
+  `THIRD_PARTY_LICENSES/B12X-APACHE-2.0.txt`.
 - NVIDIA Model Optimizer, vLLM, Hugging Face Transformers, safetensors, and
   huggingface_hub contributors.
 - Google DeepMind for Gemma 4, used as the planned portability model.

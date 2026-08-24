@@ -24,6 +24,7 @@ packages = ["src/quant_pipeline"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "THIRD_PARTY_NOTICES.md" = "quant_pipeline/THIRD_PARTY_NOTICES.md"
+"THIRD_PARTY_LICENSES" = "quant_pipeline/THIRD_PARTY_LICENSES"
 "CITATION.cff" = "quant_pipeline/CITATION.cff"
 "configs" = "quant_pipeline/resources/configs"
 "docs" = "quant_pipeline/resources/docs"
@@ -35,6 +36,7 @@ packages = ["src/quant_pipeline"]
 include = [
   "/README.md",
   "/THIRD_PARTY_NOTICES.md",
+  "/THIRD_PARTY_LICENSES",
   "/CITATION.cff",
   "/configs",
   "/docs",

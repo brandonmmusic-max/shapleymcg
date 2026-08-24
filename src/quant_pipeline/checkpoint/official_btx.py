@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Derived in part from Local Inference Lab B12X btx_synth.py at UPSTREAM_COMMIT.
 """Writer/auditor for upstream B12X ``btx-atoms-v1``.
 
 The implementation is intentionally pinned to upstream commit

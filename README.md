@@ -125,4 +125,6 @@ Clean-node configuration and non-launching checks are documented in
 environment manifests, scripts, and documentation for offline review.
 
 Source-available under the repository's attribution-required license. See
-`LICENSE`, `THIRD_PARTY_NOTICES.md`, and `docs/REFERENCES.md`.
+`LICENSE`, `THIRD_PARTY_NOTICES.md`, `THIRD_PARTY_LICENSES`, and
+`docs/REFERENCES.md`. The Apache-2.0 notice on the derived BTX writer controls
+that module.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -175,5 +176,9 @@ def test_scripts_and_runbook_expose_fail_closed_boundaries():
 def test_distribution_configuration_includes_reproducibility_assets():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
     included = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
-    for name in ("configs", "docs", "environments", "examples", "scripts"):
+    for name in ("THIRD_PARTY_LICENSES", "configs", "docs", "environments", "examples", "scripts"):
         assert name in included
+    b12x_license = ROOT / "THIRD_PARTY_LICENSES/B12X-APACHE-2.0.txt"
+    assert hashlib.sha256(b12x_license.read_bytes()).hexdigest() == (
+        "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    )
