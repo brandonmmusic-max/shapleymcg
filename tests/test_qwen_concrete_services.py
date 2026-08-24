@@ -14,7 +14,8 @@ from quant_pipeline.campaign.qwen_services import (
     QwenCodecService,
     QwenEvaluatorService,
 )
-from quant_pipeline.core.artifacts import sha256_file, write_json
+from quant_pipeline.campaign.runner import CampaignDefinition, _build_stages
+from quant_pipeline.core.artifacts import canonical_json, sha256_bytes, sha256_file, write_json
 
 
 def _runtime_module(tmp_path):
@@ -39,6 +40,33 @@ def build(options):
 """.lstrip()
     )
     return module
+
+
+def test_real_stage_graph_supplies_every_qwen_codec_install_dependency(tmp_path):
+    definition = CampaignDefinition(
+        experiment_spec="experiment.toml",
+        inputs={"source_checkpoint": "checkpoint"},
+        layers=(0,),
+        reanchor_every_layers=1,
+        reanchor_failure_policy="request_reallocation",
+        retention_mode="capture-plus-ledger",
+    )
+    encode = next(stage for stage in _build_stages(definition) if stage.kind == "causal_encode")
+    assert "causal_fit.layer_000" in encode.dependencies
+    assert "causal_candidates.layer_000" in encode.dependencies
+
+    dependency_paths = {}
+    for stage_id in encode.dependencies:
+        path = tmp_path / stage_id
+        path.mkdir()
+        dependency_paths[stage_id] = str(path)
+    from quant_pipeline.campaign.qwen_services import _dependency
+
+    context = {"dependencies": dependency_paths}
+    assert _dependency(context, "causal_fit") == (tmp_path / "causal_fit.layer_000").resolve()
+    assert _dependency(context, "causal_candidates") == (
+        tmp_path / "causal_candidates.layer_000"
+    ).resolve()
 
 
 def test_pinned_student_runtime_is_source_and_identity_bound(tmp_path, monkeypatch):
@@ -173,6 +201,7 @@ def test_allocator_composition_persists_validated_selected_cost(tmp_path, monkey
         "candidate_id": "L0.E0.g3u3d3",
         "record_sha256": "3" * 64,
         "bit_triplet": [3, 3, 3],
+        "predicted_damage": 0.5,
     }
     write_json(candidate_root / "candidate-ledger.json", {
         "ledger_sha256": "4" * 64,
@@ -181,6 +210,18 @@ def test_allocator_composition_persists_validated_selected_cost(tmp_path, monkey
     })
     write_json(candidate_root / "stage-manifest.json", {
         "provider_result": {"candidate_ledger_file": "candidate-ledger.json"}
+    })
+    attribution_root = tmp_path / "attribution"
+    attribution_root.mkdir()
+    attribution = {
+        "schema": "quant-pipeline.qwen-attribution.v1",
+        "candidate_ledger_sha256": sha256_file(candidate_root / "candidate-ledger.json"),
+        "layers": [{"layer_index": 0, "expert_direct": [0.25]}],
+    }
+    attribution["attribution_sha256"] = sha256_bytes(canonical_json(attribution))
+    write_json(attribution_root / "attribution.json", attribution)
+    write_json(attribution_root / "stage-manifest.json", {
+        "provider_result": {"attribution_file": "attribution.json"}
     })
     selected_cost = {
         "schema": "quant-pipeline.selected-allocation-cost.v1",
@@ -210,12 +251,22 @@ def test_allocator_composition_persists_validated_selected_cost(tmp_path, monkey
 
     monkeypatch.setattr(ledger_module, "allocate_validated_records", allocate)
     output = tmp_path / "allocation-output"
-    QwenAllocatorService({"exact_payload_byte_budget": 13}).allocate({
+    QwenAllocatorService({
+        "exact_payload_byte_budget": 13,
+        "attribution_provisional_bit_triplet": [3, 3, 3],
+    }).allocate({
         "output_dir": str(output),
-        "dependencies": {"candidates": str(candidate_root)},
+        "dependencies": {
+            "candidates": str(candidate_root),
+            "attribution": str(attribution_root),
+        },
     })
     document = json.loads((output / "allocation.json").read_text())
-    assert len(calls) == 2
+    assert len(calls) == 3
+    assert "damage_overrides" not in calls[0][1]
+    assert calls[1][1]["damage_overrides"] == {"L0.E0.g3u3d3": 0.25}
+    assert document["attribution_file_sha256"] == sha256_file(attribution_root / "attribution.json")
+    assert document["proxy_control_arm"]["selected_cost"] == selected_cost
     assert document["research_arm"]["selected_cost"] == selected_cost
     assert document["serving_arm"]["selected_cost"] == selected_cost
 

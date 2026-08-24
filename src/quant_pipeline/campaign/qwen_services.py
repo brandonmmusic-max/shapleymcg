@@ -210,7 +210,12 @@ class QwenRouteCaptureService:
         self.config = dict(config)
 
     def identity(self) -> Mapping[str, Any]:
-        return {"schema": SERVICE_SCHEMA, "provider": "qwen-route-capture", "implementation": "sealed-causal-prefix-replay"}
+        return {
+            "schema": SERVICE_SCHEMA,
+            "provider": "qwen-route-capture",
+            "implementation": "sealed-causal-prefix-replay",
+            "attention_backend": str(self.config.get("attention_backend", "eager")),
+        }
 
     def _model_revision(self) -> str:
         value = self.config.get("model_revision")
@@ -235,6 +240,7 @@ class QwenRouteCaptureService:
             device_map=self.config.get("device_map", "auto"),
             low_cpu_mem_usage=True,
             local_files_only=True,
+            attn_implementation=str(self.config.get("attention_backend", "eager")),
         ).eval()
         for parameter in model.parameters():
             parameter.requires_grad_(False)
@@ -298,6 +304,7 @@ class QwenRouteCaptureService:
             installed_layers=context.get("installed_layer_attempts", ()),
             installed_layer_prefix=context.get("installed_layer_prefix", ()),
             device_map=self.config.get("device_map", "auto"),
+            attn_implementation=str(self.config.get("attention_backend", "eager")),
             production_geometry=bool(context["production"]),
         )
         captures: dict[str, Any] = {}
@@ -538,8 +545,15 @@ class QwenCodecService:
     def _load_ref(store_root: Path, ref: Mapping[str, Any]):
         import torch
 
-        path = store_root / str(ref["path"])
-        if sha256_file(path) != ref["sha256"] or path.stat().st_size != int(ref["bytes"]):
+        root = store_root.resolve()
+        path = (root / str(ref["path"])).resolve()
+        if (
+            root not in path.parents
+            or not path.is_file()
+            or path.is_symlink()
+            or sha256_file(path) != ref["sha256"]
+            or path.stat().st_size != int(ref["bytes"])
+        ):
             raise ValueError("candidate exact-payload object is missing or corrupt")
         dtype = getattr(torch, str(ref["dtype"]))
         raw = bytearray(path.read_bytes())
@@ -646,7 +660,7 @@ class QwenAllocatorService:
             return False, "official BTX per_expert_pair has no K5 vocabulary"
         if bool(self.config.get("require_fused_btx", True)) and (gate == 4 or down == 4):
             return False, "P44 is schema-declared but not fused on pinned master"
-        intermediate = int(self.config.get("intermediate_size", 768))
+        intermediate = int(self.config.get("moe_intermediate_size", 768))
         slots = intermediate // 32
         alignment = 8 if structure == "per_expert_pair" else 1
         for tp in self.config.get("target_tp_degrees", [1]):
@@ -659,8 +673,56 @@ class QwenAllocatorService:
         from ..candidates.ledger import allocate_validated_records
 
         ledger_root = _dependency(context, "candidates")
-        ledger = json.loads(_result_path(ledger_root, "candidate_ledger_file").read_text())
+        ledger_path = _result_path(ledger_root, "candidate_ledger_file")
+        ledger = json.loads(ledger_path.read_text())
         records = list(ledger["candidates"])
+        attribution_root = _dependency(context, "attribution")
+        attribution_path = _result_path(attribution_root, "attribution_file")
+        attribution = json.loads(attribution_path.read_text())
+        if attribution.get("schema") != ATTRIBUTION_SCHEMA:
+            raise ValueError("allocator attribution schema mismatch")
+        seal = attribution.get("attribution_sha256")
+        if seal != _hash_json({key: value for key, value in attribution.items() if key != "attribution_sha256"}):
+            raise ValueError("allocator attribution seal mismatch")
+        if attribution.get("candidate_ledger_sha256") != sha256_file(ledger_path):
+            raise ValueError("allocator attribution belongs to a different candidate ledger")
+
+        provisional = tuple(int(value) for value in self.config.get("attribution_provisional_bit_triplet", [4, 4, 4]))
+        direct_by_unit: dict[str, float] = {}
+        for layer_row in attribution.get("layers", ()):
+            layer = int(layer_row["layer_index"])
+            for expert, direct in enumerate(layer_row["expert_direct"]):
+                direct_by_unit[f"L{layer}.E{expert}"] = float(direct)
+        by_unit: dict[str, list[dict[str, Any]]] = {}
+        for record in records:
+            by_unit.setdefault(str(record["unit_id"]), []).append(record)
+        if set(direct_by_unit) != set(by_unit):
+            raise ValueError("attribution expert inventory differs from candidate ledger")
+        damage_overrides: dict[str, float] = {}
+        calibration_rows = []
+        for unit_id, unit_records in sorted(by_unit.items()):
+            anchors = [row for row in unit_records if tuple(map(int, row["bit_triplet"])) == provisional]
+            if len(anchors) != 1:
+                raise ValueError(f"{unit_id} lacks one provisional attribution anchor")
+            anchor = anchors[0]
+            anchor_proxy = float(anchor["predicted_damage"])
+            direct = direct_by_unit[unit_id]
+            if anchor_proxy <= 0.0:
+                raise ValueError(f"{unit_id} provisional proxy damage must be positive")
+            scale = direct / anchor_proxy
+            raw = {str(row["candidate_id"]): scale * float(row["predicted_damage"]) for row in unit_records}
+            offset = max(0.0, -min(raw.values()))
+            for candidate_id, value in raw.items():
+                damage_overrides[candidate_id] = value + offset
+            calibration_rows.append({
+                "unit_id": unit_id,
+                "expert_direct": direct,
+                "provisional_candidate_id": anchor["candidate_id"],
+                "provisional_proxy_damage": anchor_proxy,
+                "signed_scale": scale,
+                "nonnegative_unit_offset": offset,
+                "provisional_unshifted_damage": raw[str(anchor["candidate_id"])],
+            })
         budget_value = self.config["byte_budget"] if "byte_budget" in self.config else self.config["exact_payload_byte_budget"]
         budget = int(budget_value)
         competitive = bool(ledger.get("competitive"))
@@ -670,7 +732,12 @@ class QwenAllocatorService:
             "competitive": competitive,
             "allow_test_backend": not competitive,
         }
-        research = allocate_validated_records(records, **allocation_options)
+        proxy_control = allocate_validated_records(records, **allocation_options)
+        research = allocate_validated_records(
+            records,
+            damage_overrides=damage_overrides,
+            **allocation_options,
+        )
         rejected = []
         legal = []
         for record in records:
@@ -678,7 +745,12 @@ class QwenAllocatorService:
             (legal if ok else rejected).append(record if ok else {
                 "candidate_id": record["candidate_id"], "unit_id": record["unit_id"], "reason": reason,
             })
-        serving = allocate_validated_records(legal, **allocation_options)
+        legal_overrides = {str(row["candidate_id"]): damage_overrides[str(row["candidate_id"])] for row in legal}
+        serving = allocate_validated_records(
+            legal,
+            damage_overrides=legal_overrides,
+            **allocation_options,
+        )
 
         def arm(value: Any) -> dict[str, Any]:
             allocation = value.allocation
@@ -701,9 +773,18 @@ class QwenAllocatorService:
         body = {
             "schema": ALLOCATION_SCHEMA,
             "ledger_sha256": ledger["ledger_sha256"],
+            "attribution_file_sha256": sha256_file(attribution_path),
+            "attribution_sha256": seal,
             "byte_budget": budget,
+            "proxy_control_arm": arm(proxy_control),
             "research_arm": arm(research),
             "serving_arm": arm(serving),
+            "shapley_damage_calibration": {
+                "method": "signed-provisional-ratio-with-unit-constant-offset-v1",
+                "provisional_bit_triplet": list(provisional),
+                "unit_rows": calibration_rows,
+                "offset_policy": "per-unit constants preserve every within-unit allocation ordering",
+            },
             "official_btx_filter": {
                 "upstream_commit": UPSTREAM_COMMIT,
                 "rejected": rejected,
@@ -745,7 +826,7 @@ class QwenEvaluatorService:
         provisional_name = provider.get("provisional_winner_manifest_file")
         if not isinstance(provisional_name, str):
             raise ValueError("candidate service must emit a sealed provisional winner manifest")
-        provisional = (ledger_root / provisional_name).resolve()
+        provisional = _result_path(ledger_root, "provisional_winner_manifest_file")
         provisional_document = json.loads(provisional.read_text())
         ledger_path = _result_path(ledger_root, "candidate_ledger_file")
         ledger = json.loads(ledger_path.read_text())
@@ -775,6 +856,7 @@ class QwenEvaluatorService:
             payload_store_root=ledger_root / "journal" / "payloads",
             output_path=_output(context) / "attribution-inputs.npz",
             device_map=self.config.get("attribution_device_map", self.config.get("device_map", "auto")),
+            attn_implementation=str(self.config.get("attention_backend", "eager")),
             path_nodes=int(self.config.get("attribution_path_nodes", 5)),
             fisher_rank=int(self.config.get("attribution_fisher_rank", 8)),
             seed=int(self.config.get("attribution_seed", 20260823)),

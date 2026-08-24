@@ -2258,6 +2258,7 @@ def allocate_validated_records(
     quantum: int = 1,
     competitive: bool = True,
     allow_test_backend: bool = False,
+    damage_overrides: Mapping[str, float] | None = None,
 ) -> ReconciledLedgerAllocation:
     """Allocate validated ledger records and prove allocator/cost closure.
 
@@ -2275,6 +2276,25 @@ def allocate_validated_records(
         competitive=competitive,
         allow_test_backend=allow_test_backend,
     )
+    if damage_overrides is not None:
+        expected = {candidate.choice_id for candidate in candidates}
+        if set(damage_overrides) != expected:
+            raise ValueError("damage override inventory differs from validated candidate records")
+        overridden: list[Candidate] = []
+        for candidate in candidates:
+            damage = damage_overrides[candidate.choice_id]
+            if isinstance(damage, bool) or not isinstance(damage, (int, float)) or not math.isfinite(float(damage)):
+                raise ValueError("candidate damage override must be finite")
+            overridden.append(
+                Candidate(
+                    unit_id=candidate.unit_id,
+                    choice_id=candidate.choice_id,
+                    stored_bytes=candidate.stored_bytes,
+                    predicted_damage=float(damage),
+                    metadata=candidate.metadata,
+                )
+            )
+        candidates = overridden
     fixed_by_layer = layer_shared_costs(rows)
     fixed_bytes = sum(int(row["semantic_layer_shared_bytes"]) for row in fixed_by_layer)
     allocation = allocate_with_fixed_layer_cost(

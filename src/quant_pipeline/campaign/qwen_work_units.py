@@ -54,7 +54,11 @@ def _dependency(context: Mapping[str, Any], prefix: str) -> Path:
     matches = [Path(value) for key, value in context["dependencies"].items() if key == prefix or key.startswith(prefix + ".")]
     if len(matches) != 1:
         raise ValueError(f"expected one {prefix} dependency")
-    return matches[0].resolve()
+    candidate = matches[0]
+    root = candidate.resolve()
+    if candidate.is_symlink() or not root.is_dir():
+        raise ValueError(f"dependency is not a regular artifact directory: {candidate}")
+    return root
 
 
 def _provider_result(root: Path) -> Mapping[str, Any]:
@@ -66,10 +70,13 @@ def _provider_result(root: Path) -> Mapping[str, Any]:
 
 def _result_path(root: Path, key: str) -> Path:
     raw = _provider_result(root).get(key)
-    if not isinstance(raw, str):
+    if not isinstance(raw, str) or not raw:
         raise ValueError(f"stage dependency lacks {key}")
     path = Path(raw)
-    return path.resolve() if path.is_absolute() else (root / path).resolve()
+    path = path.resolve() if path.is_absolute() else (root / path).resolve()
+    if root.resolve() not in path.parents or not path.is_file() or path.is_symlink():
+        raise ValueError(f"stage dependency {key} escapes or is missing")
+    return path
 
 
 def _load_capture_component(context: Mapping[str, Any], purpose: str) -> tuple[Path, dict[str, Any], str]:
@@ -83,7 +90,9 @@ def _load_capture_component(context: Mapping[str, Any], purpose: str) -> tuple[P
     if seal != _hash_json({key: value for key, value in service.items() if key != "capture_service_sha256"}):
         raise ValueError("capture service seal mismatch")
     component = service["captures"][purpose]
-    manifest_path = service_path.parent / component["manifest"]
+    manifest_path = (service_path.parent / component["manifest"]).resolve()
+    if service_path.parent.resolve() not in manifest_path.parents or manifest_path.is_symlink():
+        raise ValueError("capture component manifest escapes its stage artifact")
     manifest = verify_capture_manifest(manifest_path.parent)
     return manifest_path.parent, manifest, service["capture_service_sha256"]
 

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ..calibration.windows import verify_sealed_corpus
 from ..core.artifacts import bind_files, prepare_empty_destination, require_execute, sha256_file, write_json
+from ..evaluation.kld_window import SCHEMA as KLD_WINDOW_SCHEMA, verify_kld_window
 
 
 def _nvidia_driver_version() -> str | None:
@@ -46,8 +47,16 @@ def capture_logits(
     except Exception as error:  # pragma: no cover
         raise RuntimeError("install quant-pipeline[hf] for capture") from error
     sealed = json.loads(Path(sealed_corpus).read_text())
-    verify_sealed_corpus(sealed)
-    windows = sealed["windows"][role]
+    if sealed.get("schema") == KLD_WINDOW_SCHEMA:
+        if role != "kld":
+            raise ValueError("a KLD window must be captured with role='kld'")
+        verify_kld_window(sealed, Path(sealed_corpus).resolve().parent)
+        windows = [{"token_ids": sealed["token_ids"], "token_sha256": sealed["token_sha256"]}]
+    else:
+        if role == "kld":
+            raise ValueError("role='kld' requires a sealed KLD-window artifact")
+        verify_sealed_corpus(sealed)
+        windows = sealed["windows"][role]
     destination = prepare_empty_destination(output_dir)
     torch_dtype = getattr(torch, dtype)
     local_model = Path(model_path)

@@ -117,3 +117,9 @@ unconstrained control without reporting the allocation constraint and matched
 end-to-end KLD.  Extending BTX for independent gate/up rates or mixed K5 is a
 separate, versioned B12X schema/runtime change, not something this writer may
 silently invent.
+
+At the pinned upstream B12X commit, fused serving rejects K5 and the declared
+but unfused P44 route. With the required equal gate/up rate, this can collapse
+the serving candidate vocabulary to P33. The unconstrained research arm and
+the proxy-control arm therefore remain separate; no P33-only serving score is
+presented as evidence that the Shapley-calibrated research allocation won.

@@ -148,9 +148,14 @@ substitute for model/codec output.
   cross-expert terms, route shifts, and explicit nonlinear remainder. Reconcile
   expert totals to each measured layer and layer totals to measured KLD. Emit
   both raw and reconciled values; never rescale away a remainder silently.
-- `allocation`: consume only the validated exact-codec allocator handoff and
-  reconciled attribution. Run exact global byte allocation and emit choice IDs,
-  exact payload bytes, predicted damage, budget slack, and all source hashes.
+- `allocation`: validate the exact-codec allocator handoff, bind the sealed
+  attribution to that exact ledger, and anchor each expert's candidate proxy
+  ratios to its signed provisional Aumann-Shapley/Fisher share. A per-unit
+  constant makes the optimization scores non-negative without changing any
+  within-unit ordering. Preserve the uncalibrated proxy allocation as a
+  control, then run exact global byte allocation and emit choice IDs, exact
+  payload bytes, calibrated predicted damage, offsets, budget slack, and all
+  source hashes.
 
 #### Native attribution implementation
 
@@ -161,7 +166,8 @@ expert permutation. The later attribution stage—not the candidate stage—load
 the pinned source model and KLD window, verifies freshly reproduced source
 logits against the sealed teacher reference, and runs the full model at every
 configured Gauss-Legendre path node. Each MoE hook returns the exact source
-block output at `alpha=0` and actual decoded block output at `alpha=1`.
+block output at `alpha=0` and the decoded block output cast into the model
+compute dtype at `alpha=1`.
 
 Next-token teacher-to-path KL is differentiated with respect to every layer
 blend coefficient. Exact contemporaneously routed expert residuals are

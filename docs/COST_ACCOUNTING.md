@@ -57,7 +57,7 @@ expected-total parity gate before writing output. Container headers, alignment,
 and official BTX row padding remain physical format overhead, not model bitrate.
 
 K5 admission is independent of byte accounting. An admitted K5 triplet must
-carry the `k5-confirmation-tail-rescue-v1` rule, exact mean and p99 metrics and
+carry an explicit versioned rule, exact mean and p99 metrics and
 thresholds, a sealed selection artifact, and a different sealed confirmation
 artifact with the `disjoint-confirmation` role. A reason string alone cannot
 admit K5.

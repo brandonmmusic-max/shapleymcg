@@ -12,6 +12,7 @@ from .calibration.windows import seal_corpus
 from .campaign.runner import CampaignRunner, audit_campaign, create_plan, load_adapter, status_campaign
 from .checkpoint.reference_pack import audit_packed_checkpoint, encode_reference_checkpoint
 from .core.artifacts import require_execute, sha256_file, write_json
+from .evaluation.kld_window import seal_kld_window
 from .models.hf_capture import capture_logits
 from .models.inventory import load_inventory
 from .scoring.attribution import split_layer_damage
@@ -65,6 +66,25 @@ def command_seal(args) -> None:
 def command_capture(args) -> None:
     result = capture_logits(args.model, args.sealed_corpus, args.role, args.output_dir, args.execute, args.dtype, args.device_map, args.model_revision)
     _print({"output_dir": str(Path(args.output_dir).resolve()), "windows": len(result["records"])})
+
+
+def command_seal_kld_window(args) -> None:
+    artifact = seal_kld_window(
+        args.model,
+        args.model_revision,
+        args.dataset_revision,
+        args.output_dir,
+        args.execute,
+        args.context_length,
+    )
+    _print(
+        {
+            "output": str(Path(args.output_dir).resolve()),
+            "seal_sha256": artifact["seal_sha256"],
+            "token_sha256": artifact["token_sha256"],
+            "tokens": len(artifact["token_ids"]),
+        }
+    )
 
 
 def command_kld(args) -> None:
@@ -233,10 +253,19 @@ def build_parser() -> argparse.ArgumentParser:
     seal.add_argument("--output", required=True)
     seal.set_defaults(func=command_seal)
 
+    seal_kld = sub.add_parser("seal-kld-window", help="seal the pinned GLM-style WikiText KLD window for a target tokenizer")
+    seal_kld.add_argument("--model", required=True)
+    seal_kld.add_argument("--model-revision", required=True)
+    seal_kld.add_argument("--dataset-revision", required=True)
+    seal_kld.add_argument("--context-length", default=2048, type=int)
+    seal_kld.add_argument("--output-dir", required=True)
+    seal_kld.add_argument("--execute", action="store_true")
+    seal_kld.set_defaults(func=command_seal_kld_window)
+
     capture = sub.add_parser("capture", help="capture logits and router logits from a sealed role")
     capture.add_argument("--model", required=True)
     capture.add_argument("--sealed-corpus", required=True)
-    capture.add_argument("--role", required=True, choices=("fit", "selection", "confirmation", "final"))
+    capture.add_argument("--role", required=True, choices=("fit", "selection", "confirmation", "final", "kld"))
     capture.add_argument("--output-dir", required=True)
     capture.add_argument("--dtype", default="bfloat16", choices=("bfloat16", "float16", "float32"))
     capture.add_argument("--device-map", default="auto")

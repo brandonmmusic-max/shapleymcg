@@ -34,6 +34,7 @@ closure residual instead of normalizing expert scores to look exact.
 Implemented now:
 
 - immutable experiment specs and canonical SHA256 receipts;
+- a sealed, target-tokenized reproduction of the GLM WikiText-2 2,048-token KLD procedure;
 - document-disjoint calibration/selection/confirmation/final corpus sealing;
 - Qwen3-MoE and Gemma 4 expert inventory adapters;
 - arbitrary 2-8 bit deterministic reference packing and reconstruction;
@@ -44,6 +45,7 @@ Implemented now:
 - cross-expert quadratic attribution with exact surrogate closure;
 - explicit unresolved-remainder accounting;
 - exact codec-payload-byte Pareto pruning and global multiple-choice knapsack allocation;
+- a Shapley/Fisher-anchored allocation arm with an uncalibrated proxy control;
 - a causal, resumable campaign runner with rollback/reallocation generations;
 - canonical absolute-v31 plus pinned K3/K4/K5 GSS candidate artifacts;
 - exact candidate payload/accounting ledgers and Qwen internal/official BTX emission;

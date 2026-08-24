@@ -400,7 +400,12 @@ def _build_stages(definition: CampaignDefinition) -> list[StageSpec]:
                     (capture_id, fit_id) + tuple(predecessor_dependencies),
                     layer=layer,
                 ),
-                StageSpec(encode_id, "causal_encode", (candidates_id,) + tuple(predecessor_dependencies), layer=layer),
+                StageSpec(
+                    encode_id,
+                    "causal_encode",
+                    (candidates_id, fit_id) + tuple(predecessor_dependencies),
+                    layer=layer,
+                ),
             ]
         )
         accepted_encode_ids.append(encode_id)

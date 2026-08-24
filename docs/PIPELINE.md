@@ -9,9 +9,22 @@ runtime gates.
 ## Stage 0: freeze identity and repair the instrument
 
 Resolve the model revision, hash `config.json`, index and shards, seal the four
-document-disjoint corpus roles, and capture new BF16 teacher logits. Calibration
-data used for scales cannot appear in confirmation or final KLD. Bind software
+document-disjoint corpus roles, and capture new BF16 teacher logits. Separately,
+seal the historical GLM-style WikiText control for the target model. Calibration
+data used for scales cannot appear in confirmation or KLD. Bind software
 image/driver/tool versions in the run receipt.
+
+### Historical KLD control
+
+The cross-model control reproduces the *procedure*, not GLM token IDs or GLM
+logits. Pin `Salesforce/wikitext` at an immutable revision, load
+`wikitext-2-raw-v1` test, discard rows whose stripped text is empty, join the
+remaining original text values with two newlines, take the first
+`context_length * 5` characters, then tokenize with the target checkpoint's
+tokenizer using no special tokens and truncation to 2,048. For Qwen, that yields
+2,048 Qwen tokens and 2,047 next-token BF16 reference-logit rows. The seal binds
+the source prefix, Qwen token IDs, dataset revision, tokenizer files, model
+revision, and construction rules. It is not a calibration corpus.
 
 ## Stage 1: corrected actual-codec re-probe
 
@@ -62,6 +75,16 @@ Do not impose equal per-layer budgets. Re-encode causally so successor-layer
 statistics observe accepted quantized predecessors, and re-anchor exact KLD
 every configured layer interval.
 
+The Qwen pilot preserves an uncalibrated proxy-control allocation. Its research
+arm binds the sealed attribution to the exact candidate ledger and anchors each
+expert's candidate proxy ratios at the provisional candidate's signed
+Aumann-Shapley/Fisher share. Signed scores receive one constant offset per
+expert unit so the DP sees finite non-negative values; because every candidate
+for that unit receives the same offset, within-unit ordering and the global
+optimizer's selected solution are unchanged. The receipt publishes every
+scale, offset, provisional anchor, and both allocation arms. Exact KLD
+re-anchors—not the proxy calibration—remain the acceptance authority.
+
 ## Stage 4: pack, reconstruct and audit
 
 The internal Qwen carrier and pinned upstream `btx-atoms-v1` writer/auditor are
@@ -110,6 +133,8 @@ read-only preflight and contains an owner-approval barrier before execution.
 ```bash
 python3 -m pip install -e '.[hf,test]'
 quant-pipeline inspect examples/qwen3-30b-a3b.toml
+quant-pipeline seal-kld-window --model models/Qwen3-30B-A3B-Base --model-revision 1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9 --dataset-revision b08601e04326c79dfdd32d625aee71d232d685c3 --context-length 2048 --output-dir artifacts/qwen/kld-window --execute
+quant-pipeline capture --model models/Qwen3-30B-A3B-Base --model-revision 1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9 --sealed-corpus artifacts/qwen/kld-window/kld-window.json --role kld --output-dir artifacts/qwen/teacher-kld --execute
 quant-pipeline seal examples/qwen3-30b-a3b.toml --output artifacts/qwen/sealed-corpus.json
 quant-pipeline inventory --family qwen3_moe --config models/Qwen3-30B-A3B-Base/config.json --output artifacts/qwen/inventory.json
 quant-pipeline capture --model models/Qwen3-30B-A3B-Base --model-revision 1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9 --sealed-corpus artifacts/qwen/sealed-corpus.json --role final --output-dir artifacts/qwen/teacher-final --execute

@@ -720,6 +720,7 @@ def capture_roles_from_local_bf16(
     installed_layers: Sequence[str | Path] = (),
     installed_layer_prefix: Sequence[Mapping[str, Any]] = (),
     device_map: Any = "auto",
+    attn_implementation: str = "eager",
     production_geometry: bool = True,
 ) -> dict[str, dict[str, Any]]:
     """Load/replay one immutable model and capture all disjoint corpus roles."""
@@ -754,6 +755,7 @@ def capture_roles_from_local_bf16(
         device_map=device_map,
         low_cpu_mem_usage=True,
         local_files_only=True,
+        attn_implementation=attn_implementation,
     )
     model.eval()
     for parameter in model.parameters():

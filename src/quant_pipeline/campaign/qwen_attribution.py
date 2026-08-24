@@ -175,7 +175,7 @@ def persist_provisional_winner_deltas(
         "schema": PROVISIONAL_SCHEMA,
         "definition": "decoded_actual_codec_minus_exact_source_f32",
         "source_control": "alpha-zero-is-unmodified-source-block-output",
-        "candidate_control": "alpha-one-is-exact-decoded-block-output",
+        "candidate_control": "alpha-one-is-decoded-block-output-in-model-dtype",
         "candidate_ledger_sha256": ledger_sha,
         "bit_triplet": list(triplet),
         "payload_store_manifest_sha256": ledger["exact_payload_store"]["manifest_sha256"],
@@ -267,14 +267,12 @@ def load_provisional_decoded_weights(
         if layer not in blocks:
             raise ValueError(f"provisional candidate names absent Qwen MoE layer {layer}")
         experts = blocks[layer].experts
+        gate, up = experts.gate_up_proj.detach().chunk(2, dim=1)
         decoded = {
-            "gate_proj": experts.gate_up_proj.detach().clone(),
-            "up_proj": experts.gate_up_proj.detach().clone(),
+            "gate_proj": gate.clone(),
+            "up_proj": up.clone(),
             "down_proj": experts.down_proj.detach().clone(),
         }
-        gate, up = experts.gate_up_proj.detach().chunk(2, dim=1)
-        decoded["gate_proj"] = gate.clone()
-        decoded["up_proj"] = up.clone()
         with safe_open(root / layer_row["file"], framework="pt", device="cpu") as deltas:
             for winner in layer_row["winners"]:
                 expert = int(winner["expert"])
@@ -622,6 +620,7 @@ def produce_qwen_attribution_inputs_from_local(
     payload_store_root: str | Path,
     output_path: str | Path,
     device_map: Any = "auto",
+    attn_implementation: str = "eager",
     path_nodes: int = 5,
     fisher_rank: int = 8,
     seed: int = 20260823,
@@ -646,6 +645,7 @@ def produce_qwen_attribution_inputs_from_local(
         device_map=device_map,
         low_cpu_mem_usage=True,
         local_files_only=True,
+        attn_implementation=attn_implementation,
     ).eval()
     decoded = load_provisional_decoded_weights(
         model,

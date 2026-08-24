@@ -35,6 +35,11 @@ def test_qwen_example_configs_parse_and_bind_exact_geometry():
     assert adapter["schema"] == "quant-pipeline.qwen-production-adapter.v1"
     assert (adapter["num_hidden_layers"], adapter["num_experts"], adapter["hidden_size"], adapter["moe_intermediate_size"]) == (48, 128, 2048, 768)
     assert adapter["scientific_contract"]["normalization"] == "source-derived-absolute-v31"
+    assert adapter["scientific_contract"]["allocation_objective"].startswith("signed-shapley-fisher")
+    assert adapter["attention_backend"] == "eager"
+    assert adapter["fisher_rank"] == experiment["objective"]["fisher_rank"] == 32
+    assert adapter["attribution_fisher_rank"] == 8
+    assert adapter["k5_policy"] == "reject-all-k5-until-confirmation-rescue-is-wired-v1"
     assert campaign["layers"] == list(range(48))
     assert campaign["retention_mode"] == "capture-plus-ledger"
     assert experiment["codec"]["bits"] == [3, 4, 5]
