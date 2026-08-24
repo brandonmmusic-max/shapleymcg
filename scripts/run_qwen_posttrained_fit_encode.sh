@@ -6,7 +6,7 @@ set -euo pipefail
 
 RUN_ROOT=${RUN_ROOT:-/qwen-shapleymcg-post-run}
 CODE_ROOT=${CODE_ROOT:-${RUN_ROOT}/code}
-CAPTURE_ROOT=${CAPTURE_ROOT:-${RUN_ROOT}/calibration-capture}
+CAPTURE_ROOT=${CAPTURE_ROOT:-${RUN_ROOT}/calibration-capture-route-complete}
 SOURCE_RECEIPT=${SOURCE_RECEIPT:-${RUN_ROOT}/artifacts/source/qwen-post-source-receipt.json}
 SOURCE_MODEL=${SOURCE_MODEL:-/models/Qwen3-30B-A3B-post-4c446470}
 SOURCE_REVISION=${SOURCE_REVISION:-4c446470ba0aec43e22ac1128f9ffd915f338ba3}

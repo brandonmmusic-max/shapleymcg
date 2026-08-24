@@ -8,6 +8,7 @@ set -euo pipefail
 RUN_ROOT=${RUN_ROOT:-/qwen-shapleymcg-post-run}
 CODE_ROOT=${CODE_ROOT:-${RUN_ROOT}/code}
 ARTIFACT_ROOT=${ARTIFACT_ROOT:-/artifacts/shapleymcg/qwen3-30b-a3b-post-v1}
+CAPTURE_ROOT=${CAPTURE_ROOT:-${RUN_ROOT}/calibration-capture-route-complete}
 PYTHON=${PYTHON:-/workspace/quant-venv/bin/python}
 SOURCE_MODEL=${SOURCE_MODEL:-/models/Qwen3-30B-A3B-post-4c446470}
 SOURCE_REVISION=${SOURCE_REVISION:-4c446470ba0aec43e22ac1128f9ffd915f338ba3}
@@ -62,7 +63,7 @@ for ((layer = 0; layer < 48; layer++)); do
     test -s "${RUN_ROOT}/artifacts/hf-upload/fits/${item}.json"
     test -s "${RUN_ROOT}/fast-encode/${item}/encode-receipt.json"
 done
-find "${RUN_ROOT}/calibration-capture/fit" \
+find "${CAPTURE_ROOT}/fit" \
     -mindepth 1 -maxdepth 1 -type d -name 'layer-[0-9][0-9][0-9]' \
     -exec rm -rf -- {} +
 

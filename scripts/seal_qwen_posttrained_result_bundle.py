@@ -116,6 +116,12 @@ as strong inferred lineage evidence, not as an upstream-authored source pin.
 All arms below use the same 10 x 2,048 WikiText-2 panel, the same post-trained
 BF16 teacher logits, the same Transformers BF16 replay, and no KV cache.
 
+The original 32-window fit split left five expert/layer pairs unrouted. A
+router-only coverage pass over unused windows from the same fit documents
+selected two additional windows covering `(9,120)`, `(20,112)`, `(32,112)`,
+`(35,44)`, and `(36,13)`. No selection, confirmation, teacher, student, or KLD
+signal entered that choice. The final fit corpus therefore contains 34 windows.
+
 | Arm | Mean tokenwise KLD | Top-1 agreement |
 |---|---:|---:|
 {table}
@@ -173,6 +179,7 @@ def main() -> int:
         raise ValueError("pipeline Git revision must be immutable 40-hex")
     for name, label in (
         ("calibration-parallel.exit", "calibration"),
+        ("route-complete-capture.exit", "route-complete fit recapture"),
         ("streaming-fit-waves.exit", "fit"),
         ("encode-publish-waves.exit", "encode and fit publication"),
         ("matched-k4-evaluation.exit", "matched K4 evaluation"),
@@ -196,11 +203,17 @@ def main() -> int:
     _link_file(run_root / "inputs/reap_recall_calib.jsonl", output / "calibration/reap_recall_calib.jsonl")
     _link_file(run_root / "inputs/reap_recall_calib.role-safe-packed.jsonl", output / "calibration/reap_recall_calib.role-safe-packed.jsonl")
     _link_file(run_root / "artifacts/reap-recall-packing-receipt.json", output / "calibration/reap-recall-packing-receipt.json")
-    _link_file(run_root / "artifacts/qwen-sealed-corpus.json", output / "calibration/qwen-sealed-corpus.json")
+    _link_file(run_root / "artifacts/qwen-sealed-corpus.json", output / "calibration/qwen-sealed-corpus-initial.json")
+    _link_file(
+        run_root / "artifacts/qwen-sealed-corpus-route-complete.json",
+        output / "calibration/qwen-sealed-corpus-route-complete.json",
+    )
     for source, relative in (
-        (run_root / "calibration-capture/calibration-capture-fit-conditional_down-receipt.json", "fit-confirmation-receipt.json"),
+        (run_root / "calibration-capture/calibration-capture-fit-conditional_down-receipt.json", "initial-fit-confirmation-receipt.json"),
+        (run_root / "calibration-capture-route-complete/calibration-capture-fit-receipt.json", "fit-route-complete-receipt.json"),
         (run_root / "calibration-capture-base/calibration-capture-heldout-receipt.json", "selection-receipt.json"),
-        (run_root / "calibration-capture/fit/capture-manifest.json", "fit-manifest.json"),
+        (run_root / "calibration-capture/fit/capture-manifest.json", "initial-fit-manifest.json"),
+        (run_root / "calibration-capture-route-complete/fit/capture-manifest.json", "fit-route-complete-manifest.json"),
         (run_root / "calibration-capture/conditional_down/capture-manifest.json", "confirmation-manifest.json"),
         (run_root / "calibration-capture-base/heldout/capture-manifest.json", "selection-manifest.json"),
     ):

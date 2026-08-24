@@ -149,6 +149,7 @@ def test_posttrained_result_bundle_seals_every_hub_layer(tmp_path):
     output = tmp_path / "bundle"
     for name in (
         "calibration-parallel.exit",
+        "route-complete-capture.exit",
         "streaming-fit-waves.exit",
         "encode-publish-waves.exit",
         "matched-k4-evaluation.exit",
@@ -167,9 +168,12 @@ def test_posttrained_result_bundle_seals_every_hub_layer(tmp_path):
         "inputs/reap_recall_calib.role-safe-packed.jsonl",
         "artifacts/reap-recall-packing-receipt.json",
         "artifacts/qwen-sealed-corpus.json",
+        "artifacts/qwen-sealed-corpus-route-complete.json",
         "calibration-capture/calibration-capture-fit-conditional_down-receipt.json",
+        "calibration-capture-route-complete/calibration-capture-fit-receipt.json",
         "calibration-capture-base/calibration-capture-heldout-receipt.json",
         "calibration-capture/fit/capture-manifest.json",
+        "calibration-capture-route-complete/fit/capture-manifest.json",
         "calibration-capture/conditional_down/capture-manifest.json",
         "calibration-capture-base/heldout/capture-manifest.json",
     ):
