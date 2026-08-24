@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Measure post-trained Qwen K4 arms with a common BF16 Transformers replay.
 
-The three causal arms are captured in one source-model load:
+Four causal arms are captured in one source-model load:
 
-1. corrected-R10 K4 experts with source-BF16 attention/head;
-2. TurboDerp K4 body plus K6 head, reconstructed into the same HF model; and
-3. TurboDerp dense K4/K6 components with only its experts replaced by ours.
+1. selected corrected-R10 K3/K4 experts with source-BF16 attention/head;
+2. corrected-R10 K4 experts with source-BF16 attention/head;
+3. TurboDerp K4 body plus K6 head, reconstructed into the same HF model; and
+4. TurboDerp dense K4/K6 components with only its experts replaced by ours.
 
-The third arm is the matched-component attribution: parent, evaluator, dense
+The fourth arm is the matched-component attribution: parent, evaluator, dense
 reconstructions, router, head, and token panel are fixed; expert reconstruction
 is the only changed component.
 """
@@ -35,12 +36,18 @@ from measure_qwen_uniform_expert_controls import (
 from quant_pipeline.calibration.qwen_capture import qwen_moe_layers
 from quant_pipeline.core.artifacts import atomic_write, sha256_file, write_json
 from quant_pipeline.scoring.kld import summarize
+from run_qwen_fast_kld import _allocate, _load_candidates
 
 
 ATTENTION = ("q_proj", "k_proj", "v_proj", "o_proj")
 
 
-def _install_ours_k4(model, encode_root: Path) -> None:
+def _install_ours(
+    model,
+    encode_root: Path,
+    choices: dict[tuple[int, int, str], int] | None,
+    stage: str,
+) -> None:
     import torch
     from safetensors import safe_open
 
@@ -50,9 +57,18 @@ def _install_ours_k4(model, encode_root: Path) -> None:
         experts = blocks[layer].experts
         with safe_open(path, framework="pt", device="cpu") as handle:
             for expert in range(128):
-                gate = handle.get_tensor(f"K4.E{expert:03d}.gate_proj.reconstruction_hf")
-                up = handle.get_tensor(f"K4.E{expert:03d}.up_proj.reconstruction_hf")
-                down = handle.get_tensor(f"K4.E{expert:03d}.down_proj.reconstruction_hf")
+                gate_bit = choices[(layer, expert, "gate_proj")] if choices else 4
+                up_bit = choices[(layer, expert, "up_proj")] if choices else 4
+                down_bit = choices[(layer, expert, "down_proj")] if choices else 4
+                gate = handle.get_tensor(
+                    f"K{gate_bit}.E{expert:03d}.gate_proj.reconstruction_hf"
+                )
+                up = handle.get_tensor(
+                    f"K{up_bit}.E{expert:03d}.up_proj.reconstruction_hf"
+                )
+                down = handle.get_tensor(
+                    f"K{down_bit}.E{expert:03d}.down_proj.reconstruction_hf"
+                )
                 with torch.no_grad():
                     experts.gate_up_proj[expert, : gate.shape[0]].copy_(
                         gate.to(experts.gate_up_proj.device)
@@ -61,7 +77,7 @@ def _install_ours_k4(model, encode_root: Path) -> None:
                         up.to(experts.gate_up_proj.device)
                     )
                     experts.down_proj[expert].copy_(down.to(experts.down_proj.device))
-        print(json.dumps({"stage": "install-ours-k4", "layer": layer}), flush=True)
+        print(json.dumps({"stage": stage, "layer": layer}), flush=True)
 
 
 def _copy_exl3_linear(source, destination) -> None:
@@ -250,7 +266,12 @@ def main() -> int:
         "output": str(args.output.resolve()),
         "workers": args.workers,
         "attention_backend": args.attention_backend,
-        "arms": ["ours-expert-k4", "turboderp-full-k4", "hybrid-ours-experts"],
+        "arms": [
+            "ours-selected-k34",
+            "ours-expert-k4",
+            "turboderp-full-k4",
+            "hybrid-ours-experts",
+        ],
         "dry_run": not args.execute,
     }
     print(json.dumps(plan, sort_keys=True), flush=True)
@@ -264,6 +285,13 @@ def main() -> int:
     output.mkdir(parents=True, exist_ok=False)
     write_json(output / "plan.json", plan | {"dry_run": False})
     candidate_receipts = _verify_candidate_inventory(args.encode_root.resolve())
+    allocation_receipts, candidate_rows = _load_candidates(args.encode_root.resolve())
+    selected_allocation = _allocate(allocation_receipts, candidate_rows)
+    write_json(output / "selected-allocation.json", selected_allocation)
+    selected_choices = {
+        (int(row["layer"]), int(row["expert"]), str(row["projection"])): int(row["bits"])
+        for row in selected_allocation["choices"]
+    }
     panel = json.loads((args.panel_root / "panel.json").read_text())
     if panel.get("panel_sha256") != _hash_json(
         {key: value for key, value in panel.items() if key != "panel_sha256"}
@@ -288,7 +316,20 @@ def main() -> int:
     for parameter in model.parameters():
         parameter.requires_grad_(False)
 
-    _install_ours_k4(model, args.encode_root.resolve())
+    _install_ours(
+        model,
+        args.encode_root.resolve(),
+        selected_choices,
+        "install-ours-selected-k34",
+    )
+    selected = _score(
+        teacher_paths,
+        _capture(model, token_ids, output, "ours-selected-k34"),
+        output,
+        "ours-selected-k34",
+        args.workers,
+    )
+    _install_ours(model, args.encode_root.resolve(), None, "install-ours-k4")
     ours = _score(
         teacher_paths,
         _capture(model, token_ids, output, "ours-expert-k4"),
@@ -308,7 +349,7 @@ def main() -> int:
         "turboderp-full-k4",
         args.workers,
     )
-    _install_ours_k4(model, args.encode_root.resolve())
+    _install_ours(model, args.encode_root.resolve(), None, "install-ours-k4")
     hybrid = _score(
         teacher_paths,
         _capture(model, token_ids, output, "hybrid-ours-experts"),
@@ -331,8 +372,9 @@ def main() -> int:
                 "top1_agreement": row["top1_agreement"],
                 "report_sha256": row["report_sha256"],
             }
-            for row in (ours, turbo, hybrid)
+            for row in (selected, ours, turbo, hybrid)
         },
+        "selected_allocation_sha256": selected_allocation["allocation_sha256"],
         "matched_hybrid_kld_reduction_vs_turboderp": (
             turbo["summary"]["mean"] - hybrid["summary"]["mean"]
         )

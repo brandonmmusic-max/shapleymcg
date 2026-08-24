@@ -55,6 +55,7 @@ def test_hybrid_k4_plan_is_nonmutating_and_names_three_arms(tmp_path):
     plan = json.loads(result.stdout)
     assert plan["dry_run"] is True
     assert plan["arms"] == [
+        "ours-selected-k34",
         "ours-expert-k4",
         "turboderp-full-k4",
         "hybrid-ours-experts",
