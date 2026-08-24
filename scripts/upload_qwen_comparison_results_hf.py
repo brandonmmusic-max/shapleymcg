@@ -93,6 +93,11 @@ def main() -> int:
     parser.add_argument("--artifacts-root", type=Path, required=True)
     parser.add_argument("--path-prefix", default="results/qwen3-30b-a3b-v1")
     parser.add_argument("--receipt", type=Path, required=True)
+    parser.add_argument(
+        "--predecessor-receipt",
+        type=Path,
+        help="sealed earlier receipt whose already-verified artifacts are reused",
+    )
     args = parser.parse_args()
 
     root = args.artifacts_root.resolve()
@@ -100,7 +105,36 @@ def main() -> int:
     api.whoami()
     all_rows = []
     revisions = []
+    reused = []
+    predecessor_sha256 = None
+    if args.predecessor_receipt is not None:
+        predecessor = json.loads(args.predecessor_receipt.read_text())
+        predecessor_sha256 = predecessor.get("receipt_sha256")
+        if predecessor_sha256 != _hash_json(
+            {key: value for key, value in predecessor.items() if key != "receipt_sha256"}
+        ):
+            raise ValueError("predecessor comparison-result receipt seal mismatch")
+        if (
+            predecessor.get("repo_id") != args.repo_id
+            or predecessor.get("repo_type") != "dataset"
+            or predecessor.get("path_prefix") != args.path_prefix
+        ):
+            raise ValueError("predecessor receipt identifies a different publication target")
+        revisions.extend(predecessor.get("artifact_revisions", []))
+        reused = [str(row["artifact"]) for row in revisions]
+        if len(reused) != len(set(reused)) or any(name not in ARTIFACTS for name in reused):
+            raise ValueError("predecessor receipt has duplicate or unknown artifacts")
+        all_rows.extend(dict(row) for row in predecessor.get("files", []))
     for name in ARTIFACTS:
+        if name in reused:
+            print(
+                json.dumps(
+                    {"stage": "reuse-verified-predecessor", "artifact": name},
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+            continue
         rows = _inventory(root, name, args.path_prefix)
         all_rows.extend(rows)
         commit = api.upload_folder(
@@ -146,6 +180,8 @@ def main() -> int:
         "file_count": len(all_rows),
         "total_bytes": sum(int(row["bytes"]) for row in all_rows),
         "remote_verification": "size-all; sha256-lfs; git-blob-sha1-non-lfs",
+        "reused_predecessor_artifacts": reused,
+        "predecessor_receipt_sha256": predecessor_sha256,
     }
     receipt["receipt_sha256"] = _hash_json(receipt)
     args.receipt.parent.mkdir(parents=True, exist_ok=True)
