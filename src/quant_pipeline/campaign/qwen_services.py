@@ -1021,7 +1021,7 @@ class QwenCheckpointService:
         if not compatibility["compatible"]:
             raise RuntimeError("official BTX compatibility failed: " + "; ".join(compatibility["failures"]))
         checkpoint_root = _output(context) / "checkpoint"
-        result = emit_official_btx_checkpoint(
+        emit_official_btx_checkpoint(
             output_dir=checkpoint_root,
             installed_layers=installed,
             expected_allocated_payload_bytes=int(reconciliation["allocated_payload_bytes"]),
@@ -1035,7 +1035,7 @@ class QwenCheckpointService:
         write_json(_output(context) / "emission-accounting-audit.json", structural)
         return {
             "checkpoint_manifest_file": "checkpoint/btx-manifest.json",
-            "checkpoint_manifest_sha256": result["checkpoint_manifest_sha256"],
+            "checkpoint_manifest_sha256": structural["manifest_sha256"],
             "allocation_reconciliation_file": "installed-allocation-reconciliation.json",
             "emission_accounting_audit_file": "emission-accounting-audit.json",
         }

@@ -171,7 +171,7 @@ def test_checkpoint_composition_uses_reconciled_total_and_nested_official_audit(
         observed["expected"] = expected_allocated_payload_bytes
         output_dir.mkdir(parents=True)
         write_json(output_dir / "btx-manifest.json", {"fixture": True})
-        return {"checkpoint_manifest_sha256": "2" * 64}
+        return {"kind": "btx-manifest", "fixture": True}
 
     monkeypatch.setattr(qwen_services, "reconcile_installed_allocation", reconcile)
     monkeypatch.setattr(qwen_services, "btx_compatibility_report", lambda *_args, **_kwargs: {"compatible": True})
@@ -181,6 +181,7 @@ def test_checkpoint_composition_uses_reconciled_total_and_nested_official_audit(
         "audit_official_btx_checkpoint",
         lambda *_args, **_kwargs: {
             "ok": True,
+            "manifest_sha256": "2" * 64,
             "accounting": {"source_semantic_allocated_payload_bytes": 123},
         },
     )
@@ -191,6 +192,7 @@ def test_checkpoint_composition_uses_reconciled_total_and_nested_official_audit(
         "dependencies": {"allocation": str(allocation_root)},
     })
     assert observed["expected"] == 123
+    assert result["checkpoint_manifest_sha256"] == "2" * 64
     assert result["allocation_reconciliation_file"] == "installed-allocation-reconciliation.json"
     assert json.loads((output / "emission-accounting-audit.json").read_text())["accounting"][
         "source_semantic_allocated_payload_bytes"
