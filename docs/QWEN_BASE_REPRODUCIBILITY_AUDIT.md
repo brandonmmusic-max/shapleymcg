@@ -2,15 +2,15 @@
 
 Audit date: 2026-08-24
 
-This ledger maps the completed fixed-Hadamard Qwen Base control to current,
-remote evidence. It does not promote the control to a compact checkpoint or
-claim that the separate Aumann-Shapley/causal research arm has been executed.
+This ledger maps the completed fixed-Hadamard Qwen Base control and subsequent
+causal-allocation experiment to current remote evidence. It does not promote
+the expanded validation reconstruction to a compact runtime checkpoint.
 
 ## Requirement-to-evidence map
 
 | Requirement | Current evidence | Result |
 | --- | --- | --- |
-| Executable calibration-to-encoding implementation | GitHub commit `e40190a0e1bb0416cdf4e9fe65b91358fb4d676b`, retained in current `main`; current suite is 254/254 passing | Proven for the fixed-Hadamard Base control |
+| Executable calibration-to-encoding implementation | Current `publish/v0.2` history contains the fixed-Hadamard and causal paths; current suite collects 264 tests | Proven for the fixed-Hadamard and causal Base experiments |
 | Immutable Base parent | `Qwen/Qwen3-30B-A3B-Base@1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9`; source receipt is in the control bundle | Proven |
 | Historical GLM KLD procedure lineage | Pinned `Salesforce/wikitext` revision, source prefix, Qwen token IDs, construction rules, KLD window, and Qwen BF16 teacher logits are all sealed in the bundle | Proven as a target-tokenized reproduction of the procedure, not reused GLM token IDs/logits |
 | Calibration identity and role separation | Original and role-safe JSONL, sealed corpus, fit/selection/confirmation capture manifests, exact token hashes, and receipts are in the bundle | Proven |
@@ -19,7 +19,7 @@ claim that the separate Aumann-Shapley/causal research arm has been executed.
 | Selected quantization validation | Exact 3.5 logical expert-BPW allocation, selected tensor hashes, student logits, tokenwise KLD, and independent replay are sealed | Proven |
 | Published reproducibility artifacts | Base dataset, validation reconstruction model, manifests, receipts, hashes, environment lock, and software extension are remotely available at immutable revisions | Proven |
 | Packed runtime qualification | The published model is an expanded BF16 reconstruction; official BTX cannot express its independent gate/up choices | Not claimed and outside this completed control |
-| Full Aumann-Shapley/causal research arm | Pipeline code and contracts exist, but the fixed-Hadamard control is not evidence that this separate arm ran | Not claimed |
+| Full Aumann-Shapley/causal research arm | 48-layer path attribution, routed Fisher/Jacobian split, explicit remainder reconciliation, exact-rate allocation, two matched SDPA panels, and independent replays are sealed | Proven for allocation-quality KLD; packed runtime remains separate |
 
 ## Immutable publication pins
 
@@ -39,6 +39,9 @@ claim that the separate Aumann-Shapley/causal research arm has been executed.
   `b0af2ce0c0af3bafd1b8e5a101269a1c91fdf2f9d2cce105321b63b3ee130895`
 - Per-layer receipts: 48 fit plus 48 candidate receipts; all internal seals,
   layer identities, repository paths, byte counts, and bundle references match
+- Causal evidence repository head: `a1f669e5b42f041fa28017670fd86b183f5103d0`
+- Matched causal/control 20k comparison seal:
+  `8d8438df03d0f9a34a4a5a79912dd232baa401f24d8e6e14bb942bf00062a608`
 
 ### Validation reconstruction model
 
@@ -88,6 +91,20 @@ the token IDs and logits are necessarily regenerated with Qwen.
 - Same-parent panel top-1 agreement: `0.908447265625`
 - Same-parent report seal:
   `8e9a55f56051ee62a6fd3299ae4344403073864f58d9553cf5bb7dd961d15426`
+
+## Measured causal allocation
+
+- Allocation seal:
+  `10bb3b71a2258500b281e3b37d57657e5e0ecf9318bb9c1a3fc6dbd2326e63c4`
+- Exact rate: 9,216 K3 plus 9,216 K4 routed-expert matrix choices
+- Changed placements versus historical allocation: 9,392 / 18,432
+- Matched 20,480-position historical / causal mean KLD:
+  `0.04908888647295481` / `0.04529370272688347`
+- Relative KLD reduction: `0.0773124839195991` (7.731248%)
+- Historical / causal top-1 agreement: `0.908203125` / `0.910888671875`
+- Causal / historical independent verification seals:
+  `6e4215f276d69ca53ce1ed29c2a900f5e040d41594a9e2ab24cb247ddec90265` /
+  `752e83112522f1f8bfe2cbf7797196cc7961164b7617ccb22d92f7e60c8a1911`
 
 ## Reproduction entry points
 

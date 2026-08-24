@@ -18,6 +18,23 @@ encoder/calibration stack remains behind TurboDerp. See the
 [matched comparison report](docs/QWEN_POSTTRAINED_TURBODERP_COMPARISON.md) and
 [compact sealed record](results/qwen3-30b-a3b-posttrained/fullscope-summary.json).
 
+## Base-model causal allocation result
+
+The full two-level Aumann–Shapley/Fisher arm is now measured. At the identical
+3.5 routed-expert BPW and with the parent, MCG candidates, BF16 teacher, tokens,
+SDPA arithmetic, and all non-expert weights fixed, the causal allocation lowers
+mean KLD from `0.04908888647295481` to `0.04529370272688347` over 20,480
+positions: a **7.731248% reduction** with a **0.268555 percentage-point** top-1
+gain. Independent NumPy float64 replay reproduced both per-token vectors with
+zero maximum difference. A separate 2,047-position window gives the same
+direction with an 11.896262% reduction. See the
+[causal result and interpretation](docs/QWEN_CAUSAL_ALLOCATION_RESULT.md) and
+the checked-in [20k comparison](results/qwen3-30b-a3b-base/causal-vs-historical-sdpa-20k.json).
+
+The raw five-node layer attribution explained 69.58% of the measured uniform-K4
+endpoint; the remaining 30.42% is published explicitly and reconciled in a
+separate step. Exact ledger closure is not presented as raw proxy additivity.
+
 ## Status: first full Qwen/B200 control measured and independently verified
 
 This repository now contains local implementations of the calibration fitter,
@@ -108,9 +125,9 @@ permutation controls crossed with the three historical scale families through
 canonical absolute-v31 and pinned K3/K4/K5 GSS; emits exact candidate payloads;
 keeps research and official-BTX-compatible allocation arms separate; and
 installs layers causally before pinned BTX emission/audit. These paths are
-implemented. The fast fixed-Hadamard K3/K4 control is now qualified for
-reconstructed-BF16 KLD on real Qwen/B200 hardware; the full Shapley allocation
-and native BTX/runtime arms remain separate future gates.
+implemented. The fixed-Hadamard K3/K4 control and full causal allocation are
+now qualified for reconstructed-BF16 KLD on real Qwen/B200 hardware. Native
+BTX/runtime qualification remains a separate future gate.
 
 The native causal attribution producer is checked in. The candidate stage
 persists an explicit actual-codec provisional control and exact decoded-minus-
@@ -121,8 +138,10 @@ differentiable per-layer blends, measures next-token KL gradients, and projects
 exact routed expert residuals through score-function Fisher VJPs. Cross-expert
 and routing/backend residuals remain explicit. A tiny real PyTorch Qwen MoE
 fixture validates direction, closure, source control, non-identity permutations,
-and tamper failure. The full native causal-attribution arm remains pending a
-real-Qwen comparison against the published fixed-Hadamard control.
+and tamper failure. The full native causal-attribution arm has now run on real
+Qwen, produced an exact-rate allocation, and improved on the historical
+Hessian/router control in both sealed SDPA comparisons. The full attribution
+and its unresolved remainder are published rather than normalized away.
 
 Reconstructed-BF16 re-anchor KLD and native-BTX final student KLD remain
 separate acceptance gates.

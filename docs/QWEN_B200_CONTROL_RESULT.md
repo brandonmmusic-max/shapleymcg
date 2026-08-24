@@ -231,6 +231,28 @@ rules out a KL-direction, aggregation, or token-count explanation.
 - Five-seed score-blind summary seal:
   `ea1b34dac4ee1102016021f46e4208d0745f468440f6ac278ca5ade3719355af`
 
+## Subsequent causal-allocation result
+
+The fixed-Hadamard result above remains the historical control. A later full
+Aumann–Shapley/Fisher run reused the same decoded MCG candidate inventory and
+held the Base revision, teacher logits, tokens, SDPA arithmetic, exact 9,216
+K3/9,216 K4 count, and all non-expert weights fixed. It changed 9,392 of 18,432
+matrix choices.
+
+| Matched 20,480-position SDPA panel | Mean KLD | Top-1 agreement |
+|---|---:|---:|
+| Historical Hessian/router allocation | 0.04908888647295481 | 0.908203125 |
+| **Causal Aumann–Shapley/Fisher allocation** | **0.04529370272688347** | **0.910888671875** |
+
+The causal allocation reduces mean KLD by **7.731248%** and gains **0.268555
+percentage points** in top-1 agreement. Independent NumPy float64 replay
+reproduced both stored token-KLD vectors exactly. The separate 2,047-position
+comparison also favors the causal allocation by 11.896262%.
+
+The full methodology, raw attribution remainder, limits of the reconstructed
+Hill-paper comparison, seals, and supported claim language are in
+[`QWEN_CAUSAL_ALLOCATION_RESULT.md`](QWEN_CAUSAL_ALLOCATION_RESULT.md).
+
 ## What this result establishes
 
 It establishes that the fixed-Hadamard, source-derived absolute-v31,
