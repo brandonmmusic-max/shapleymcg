@@ -41,6 +41,11 @@ from .factory_union import (
     FactoryUnion,
     build_factory_union,
 )
+from .factory_calibration import (
+    FactoryDeltaAnchor,
+    apply_factory_delta_calibration,
+    fit_factory_delta_calibration,
+)
 
 __all__ = [
     "BackendAttestation",
@@ -80,4 +85,7 @@ __all__ = [
     "FactoryProposal",
     "FactoryUnion",
     "build_factory_union",
+    "FactoryDeltaAnchor",
+    "apply_factory_delta_calibration",
+    "fit_factory_delta_calibration",
 ]

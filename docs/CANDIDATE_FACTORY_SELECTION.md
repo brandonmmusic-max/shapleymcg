@@ -98,6 +98,13 @@ factory decisions than a local proxy. The proxy is still needed to make
 fine-grained selection computationally tractable; measured aggregate effects
 calibrate it and the untouched final panel verifies it.
 
+`quant_pipeline.candidates.factory_calibration` implements the calibration as
+leave-one-layer-out ridge regression of measured challenger-minus-reference
+KLD on the common proxy delta. The map shrinks toward the identity (not toward
+either factory), preserves out-of-fold residual uncertainty, and never consumes
+the final evaluation rows. Strong measured effects can therefore influence
+fine-grained candidate scores while noisy layer ties receive limited leverage.
+
 ## Claim gates
 
 - **Allocator claim:** requires common candidate bytes and common rate.
