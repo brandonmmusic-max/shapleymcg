@@ -26,6 +26,18 @@ fi
 test -s "${HF_TOKEN_SOURCE}"
 mkdir -p "${LOG_ROOT}"
 
+range_fit_published() {
+    local first=$1
+    local last=$2
+    local layer item
+
+    for ((layer = first; layer < last; layer++)); do
+        item=$(printf 'layer-%03d' "${layer}")
+        test -s "${RUN_ROOT}/artifacts/hf-upload/fits/${item}.json" || return 1
+        test ! -e "${RUN_ROOT}/streaming-fit/${item}" || return 1
+    done
+}
+
 for ((start = 0; start < LAYERS; start += WAVE_SIZE)); do
     end=$((start + WAVE_SIZE))
     ((end > LAYERS)) && end=${LAYERS}
@@ -48,20 +60,24 @@ for ((start = 0; start < LAYERS; start += WAVE_SIZE)); do
         bash "${CODE_ROOT}/scripts/run_qwen_encode_waves.sh" \
         > "${LOG_ROOT}/encode-wave-${label}.log" 2>&1
 
-    token_file="${RUN_ROOT}/.hf-fit-wave-${label}.token"
-    install -m 600 "${HF_TOKEN_SOURCE}" "${token_file}"
-    HF_HUB_DISABLE_XET=1 PYTHONPATH="${CODE_ROOT}/src:${PYTHONPATH:-}" \
-        "${PYTHON}" "${CODE_ROOT}/scripts/upload_qwen_bulk_remaining_hf.py" \
-        --repo-id "${HF_REPO_ID}" \
-        --run-root "${RUN_ROOT}" \
-        --token-file "${token_file}" \
-        --kind fit \
-        --first-layer "${start}" \
-        --layers "${count}" \
-        --delete-verified \
-        --batch-layers 4 \
-        --retry-minutes 75 \
-        > "${LOG_ROOT}/hf-fit-wave-${label}.log" 2>&1
+    if range_fit_published "${start}" "${end}"; then
+        printf 'adopted remotely verified fit artifacts for layers %s\n' "${label}"
+    else
+        token_file="${RUN_ROOT}/.hf-fit-wave-${label}.token"
+        install -m 600 "${HF_TOKEN_SOURCE}" "${token_file}"
+        HF_HUB_DISABLE_XET=1 PYTHONPATH="${CODE_ROOT}/src:${PYTHONPATH:-}" \
+            "${PYTHON}" "${CODE_ROOT}/scripts/upload_qwen_bulk_remaining_hf.py" \
+            --repo-id "${HF_REPO_ID}" \
+            --run-root "${RUN_ROOT}" \
+            --token-file "${token_file}" \
+            --kind fit \
+            --first-layer "${start}" \
+            --layers "${count}" \
+            --delete-verified \
+            --batch-layers 4 \
+            --retry-minutes 75 \
+            > "${LOG_ROOT}/hf-fit-wave-${label}.log" 2>&1
+    fi
 
     for ((layer = start; layer < end; layer++)); do
         item=$(printf 'layer-%03d' "${layer}")
