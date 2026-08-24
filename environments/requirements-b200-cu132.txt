@@ -9,6 +9,7 @@ accelerate==1.14.0
 annotated-types==0.7.0
 sentencepiece==0.2.1
 ninja==1.13.0
+pillow==12.1.0
 pydantic==2.12.5
 pydantic-core==2.41.5
 setuptools==80.10.2

@@ -74,6 +74,9 @@ def _import_exllamav3_reader(exllamav3_root: Path):
     model_package.__path__ = [str(package_root / "model")]
     sys.modules["exllamav3.model"] = model_package
     from exllamav3.model.config import Config
+
+    # Preserve the public attribute used by cache modules during Model import.
+    model_package.Config = Config
     from exllamav3.model.model import Model
 
     return Config, Model
