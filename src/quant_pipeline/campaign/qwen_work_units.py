@@ -119,21 +119,34 @@ class _CheckpointWeights:
                 self.mapping = {name: "model.safetensors" for name in handle.keys()}
         else:
             raise FileNotFoundError("source checkpoint has no safetensors index or monolith")
+        self._cache: dict[str, Any] = {}
 
     def tensor(self, name: str):
         from safetensors import safe_open
 
+        if name in self._cache:
+            return self._cache[name]
         filename = self.mapping.get(name)
         if not isinstance(filename, str):
             raise KeyError(f"source checkpoint lacks {name}")
         with safe_open(self.root / filename, framework="pt", device="cpu") as handle:
-            return handle.get_tensor(name).contiguous()
+            value = handle.get_tensor(name).contiguous()
+        self._cache[name] = value
+        return value
 
     def expert(self, layer: int, expert: int) -> ProjectionTensors:
         prefix = f"model.layers.{layer}.mlp.experts"
-        stacked = self.tensor(prefix + ".gate_up_proj")[expert]
-        gate, up = stacked.chunk(2, dim=0)
-        down = self.tensor(prefix + ".down_proj")[expert]
+        stacked_gate_up = prefix + ".gate_up_proj"
+        stacked_down = prefix + ".down_proj"
+        if stacked_gate_up in self.mapping and stacked_down in self.mapping:
+            stacked = self.tensor(stacked_gate_up)[expert]
+            gate, up = stacked.chunk(2, dim=0)
+            down = self.tensor(stacked_down)[expert]
+        else:
+            expert_prefix = f"{prefix}.{expert}"
+            gate = self.tensor(expert_prefix + ".gate_proj.weight")
+            up = self.tensor(expert_prefix + ".up_proj.weight")
+            down = self.tensor(expert_prefix + ".down_proj.weight")
         return ProjectionTensors(gate.contiguous(), up.contiguous(), down.contiguous())
 
 
@@ -159,80 +172,112 @@ def _fit_rows(fit_path: Path, layer: int) -> dict[int, tuple[FittedExpertStatist
 
 
 def _document_hash(metadata: Mapping[str, Any]) -> str:
-    return sha256_bytes(str(metadata["document_id"]).encode())
+    return sha256_bytes(canonical_json({
+        "document_id": str(metadata["document_id"]),
+        "token_sha256": str(metadata["token_sha256"]),
+    }))
 
 
-def _expert_batches(root: Path, manifest: Mapping[str, Any], layer: int, expert: int, *, conditional: bool):
+def _all_expert_batches(
+    root: Path,
+    manifest: Mapping[str, Any],
+    layer: int,
+    experts: Sequence[int],
+    *,
+    conditional: bool,
+):
     import torch
 
-    batches = []
+    requested = set(map(int, experts))
+    batches: dict[int, list[Any]] = {expert: [] for expert in sorted(requested)}
     artifact_sha = str(manifest["capture_sha256"])
     for record in manifest["records"][str(layer)]:
         metadata, tensors = _read_chunk(root / record["file"])
         assignment_expert = tensors["assignment_expert_ids"].long()
-        selected = torch.nonzero(assignment_expert == expert, as_tuple=False).flatten()
-        if not len(selected):
-            continue
-        offsets = tensors["assignment_token_offsets"].long()[selected]
-        hidden = tensors["routed_hidden_states"][selected].contiguous()
-        route_weights = tensors["assignment_router_weights"][selected].contiguous()
-        source_indices = tensors["expert_ids"].long()[offsets].contiguous()
-        source_weights = tensors["router_weights"][offsets].contiguous()
-        rows = [f"{metadata['document_id']}:{int(metadata['start_token']) + int(offset)}:L{layer}:E{expert}" for offset in offsets]
-        document_sha = _document_hash(metadata)
-        batch_id = f"{metadata['role']}:{metadata['window_index']}:L{layer}:E{expert}"
-        if conditional:
-            identity = {
-                "conditional_down_fit_artifact_sha256": artifact_sha,
-                "row_identity_sha256": _hash_json(rows),
-                "document_sha256": document_sha,
-                "layer": layer,
-                "expert": expert,
-            }
-            batch = ConditionalDownFitBatch(
-                batch_id=batch_id,
-                hidden_states=hidden,
-                route_weights=route_weights,
-                sampling_weights=torch.ones_like(route_weights),
-                source_route_indices=source_indices,
-                source_route_weights=source_weights,
-                identity=identity,
-                row_keys=rows,
-            )
-            batch = replace(batch, identity=identity | {"batch_payload_sha256": conditional_down_fit_batch_sha256(batch)})
-        else:
-            fisher = None
-            if "fisher_gradients" in tensors:
-                raw = tensors["fisher_gradients"]
-                if raw.ndim != 4 or raw.shape[1] != 1:
-                    raise ValueError("Qwen Fisher capture must have one batch dimension per sealed window")
-                fisher = raw[:, 0, offsets].contiguous()
-            identity = {
-                "document_sha256": document_sha,
-                "heldout_artifact_sha256": artifact_sha,
-                "capture_artifact_sha256": artifact_sha,
-                "fisher_probe_sha256": _hash_json({"capture": artifact_sha, "rank": int(manifest["fisher_rank"])}),
-                "fisher_window_sha256": _hash_json({"capture": artifact_sha, "window_set": "all"}),
-                "layer": layer,
-                "expert": expert,
-            }
-            batch = RoutedExpertBatch(
-                batch_id=batch_id,
-                hidden_states=hidden,
-                route_weights=route_weights,
-                source_route_indices=source_indices,
-                source_route_weights=source_weights,
-                candidate_route_indices=source_indices.clone(),
-                candidate_route_weights=source_weights.clone(),
-                fisher_gradients=fisher,
-                identity=identity,
-                row_keys=rows,
-            )
-            batch = replace(batch, identity=identity | {"batch_payload_sha256": routed_batch_sha256(batch)})
-        batches.append(batch)
-    if not batches:
-        raise ValueError(f"capture has no rows for layer {layer} expert {expert}")
-    return tuple(batches)
+        present = sorted(requested.intersection(map(int, torch.unique(assignment_expert).tolist())))
+        for expert in present:
+            selected = torch.nonzero(assignment_expert == expert, as_tuple=False).flatten()
+            offsets = tensors["assignment_token_offsets"].long()[selected]
+            hidden = tensors["routed_hidden_states"][selected].contiguous()
+            route_weights = tensors["assignment_router_weights"][selected].contiguous()
+            source_indices = tensors["expert_ids"].long()[offsets].contiguous()
+            source_weights = tensors["router_weights"][offsets].contiguous()
+            rows = [
+                f"{metadata['document_id']}@{metadata['token_sha256']}:"
+                f"{int(metadata['start_token']) + int(offset)}:L{layer}:E{expert}"
+                for offset in offsets
+            ]
+            document_sha = _document_hash(metadata)
+            batch_id = f"{metadata['role']}:{metadata['window_index']}:L{layer}:E{expert}"
+            if conditional:
+                identity = {
+                    "conditional_down_fit_artifact_sha256": artifact_sha,
+                    "row_identity_sha256": _hash_json(rows),
+                    "document_sha256": document_sha,
+                    "layer": layer,
+                    "expert": expert,
+                }
+                batch = ConditionalDownFitBatch(
+                    batch_id=batch_id,
+                    hidden_states=hidden,
+                    route_weights=route_weights,
+                    sampling_weights=torch.ones_like(route_weights),
+                    source_route_indices=source_indices,
+                    source_route_weights=source_weights,
+                    identity=identity,
+                    row_keys=rows,
+                )
+                batch = replace(
+                    batch,
+                    identity=identity | {"batch_payload_sha256": conditional_down_fit_batch_sha256(batch)},
+                )
+            else:
+                fisher = None
+                if "fisher_gradients" in tensors:
+                    raw = tensors["fisher_gradients"]
+                    if raw.ndim != 4 or raw.shape[1] != 1:
+                        raise ValueError("Qwen Fisher capture must have one batch dimension per sealed window")
+                    fisher = raw[:, 0, offsets].contiguous()
+                identity = {
+                    "document_sha256": document_sha,
+                    "heldout_artifact_sha256": artifact_sha,
+                    "capture_artifact_sha256": artifact_sha,
+                    "fisher_probe_sha256": _hash_json({
+                        "capture": artifact_sha, "rank": int(manifest["fisher_rank"]),
+                    }),
+                    "fisher_window_sha256": _hash_json({
+                        "capture": artifact_sha, "window_set": "all",
+                    }),
+                    "layer": layer,
+                    "expert": expert,
+                }
+                batch = RoutedExpertBatch(
+                    batch_id=batch_id,
+                    hidden_states=hidden,
+                    route_weights=route_weights,
+                    source_route_indices=source_indices,
+                    source_route_weights=source_weights,
+                    candidate_route_indices=source_indices.clone(),
+                    candidate_route_weights=source_weights.clone(),
+                    fisher_gradients=fisher,
+                    identity=identity,
+                    row_keys=rows,
+                )
+                batch = replace(
+                    batch,
+                    identity=identity | {"batch_payload_sha256": routed_batch_sha256(batch)},
+                )
+            batches[expert].append(batch)
+    missing = [expert for expert, rows in batches.items() if not rows]
+    if missing:
+        raise ValueError(f"capture has no rows for layer {layer} experts {missing[:8]}")
+    return {expert: tuple(rows) for expert, rows in batches.items()}
+
+
+def _expert_batches(root: Path, manifest: Mapping[str, Any], layer: int, expert: int, *, conditional: bool):
+    """Compatibility wrapper around the one-pass layer partitioner."""
+
+    return _all_expert_batches(root, manifest, layer, (expert,), conditional=conditional)[expert]
 
 
 def _permuted_statistics(value: FittedExpertStatistics, permutation: Sequence[int]) -> FittedExpertStatistics:
@@ -276,9 +321,43 @@ def _proposal(
     intermediate = int(next(iter(source.values())).gate_proj.shape[0])
     shared_gate_sign = _sign(hidden, seed, layer, policy, family, "gate-up-suh")
     shared_down_sign = _sign(hidden, seed, layer, policy, family, "down-svh")
+    gate_mass = 0.0
+    shared_gate_diagonal = np.zeros(hidden, dtype=np.float64)
+    down_output_mass = 0.0
+    shared_down_output_energy = np.zeros(hidden, dtype=np.float64)
+    gate_diagonals: dict[int, np.ndarray] = {}
+    down_diagonals: dict[int, np.ndarray] = {}
     for expert in sorted(source):
         gate_fit, down_fit = fits[expert]
-        diagonal = np.diag(down_fit.dense_hessian("combined", 2, regularized=False))
+        gate_weight = float(
+            gate_fit.metadata["accounting"]["combined"]["powers"]["2"]["weight_sum"]
+        )
+        down_weight = float(
+            down_fit.metadata["accounting"]["combined"]["powers"]["2"]["weight_sum"]
+        )
+        gate_diagonals[expert] = np.diag(
+            gate_fit.dense_hessian("combined", 2, regularized=False)
+        ).copy()
+        down_diagonals[expert] = np.diag(
+            down_fit.dense_hessian("combined", 2, regularized=False)
+        ).copy()
+        shared_gate_diagonal += gate_weight * gate_diagonals[expert]
+        shared_down_output_energy += down_weight * (
+            source[expert].down_proj.float().pow(2).mean(dim=1).numpy()
+        )
+        gate_mass += gate_weight
+        down_output_mass += down_weight
+    if gate_mass <= 0.0 or down_output_mass <= 0.0:
+        raise ValueError("proposal layer has non-positive shared transform mass")
+    shared_gate_k_scales = scale_family_candidates(
+        _block_values(shared_gate_diagonal / gate_mass, block)
+    )[family]
+    shared_down_n_scales = scale_family_candidates(
+        _block_values(shared_down_output_energy / down_output_mass, block)
+    )[family]
+    for expert in sorted(source):
+        gate_fit, down_fit = fits[expert]
+        diagonal = down_diagonals[expert]
         permutation = policy_permutations(diagonal, block=block)[policy]
         gate, up, down = permute_expert_hf(
             source[expert].gate_proj, source[expert].up_proj, source[expert].down_proj, permutation
@@ -286,20 +365,30 @@ def _proposal(
         transformed_down_fit = _permuted_statistics(down_fit, permutation)
         proposal_source[expert] = ProjectionTensors(gate, up, down)
         proposal_fits[expert] = (gate_fit, transformed_down_fit)
-        gate_h = np.diag(gate_fit.dense_hessian("combined", 2, regularized=False))
-        down_h = np.diag(transformed_down_fit.dense_hessian("combined", 2, regularized=False))
+        gate_h = gate_diagonals[expert]
+        down_h = down_diagonals[expert][np.asarray(permutation, dtype=np.int64)]
         for projection, weight, hdiag, suh, svh in (
             ("gate_proj", gate, gate_h, shared_gate_sign, _sign(intermediate, seed, layer, expert, policy, family, "gate-svh")),
             ("up_proj", up, gate_h, shared_gate_sign, _sign(intermediate, seed, layer, expert, policy, family, "up-svh")),
             ("down_proj", down, down_h, _sign(intermediate, seed, layer, expert, policy, family, "down-suh"), shared_down_sign),
         ):
-            k_values = _block_values(hdiag, block)
-            n_values = _block_values(weight.float().pow(2).mean(dim=1).numpy(), block)
+            k_scales = (
+                shared_gate_k_scales
+                if projection != "down_proj"
+                else scale_family_candidates(_block_values(hdiag, block))[family]
+            )
+            n_scales = (
+                shared_down_n_scales
+                if projection == "down_proj"
+                else scale_family_candidates(
+                    _block_values(weight.float().pow(2).mean(dim=1).numpy(), block)
+                )[family]
+            )
             matrices.append(MatrixInput(
                 key=f"E{expert}.{projection}", projection=projection, bits=4,
                 weight_kn=weight.T.contiguous(), suh_sign=suh, svh_sign=svh,
-                k_block_scales=scale_family_candidates(k_values)[family],
-                n_block_scales=scale_family_candidates(n_values)[family],
+                k_block_scales=k_scales,
+                n_block_scales=n_scales,
                 mass=float((gate_fit if projection != "down_proj" else transformed_down_fit).metadata["accounting"]["combined"]["powers"]["2"]["weight_sum"]),
             ))
     return matrices, proposal_source, proposal_fits
@@ -397,8 +486,12 @@ def materialize_candidate_work_units(
     fits = _fit_rows(fit_path, layer)
     weights = _CheckpointWeights(context["inputs"]["source_checkpoint"])
     source = {expert: weights.expert(layer, expert) for expert in sorted(fits)}
-    heldout = {expert: _expert_batches(heldout_root, heldout_manifest, layer, expert, conditional=False) for expert in source}
-    conditional = {expert: _expert_batches(conditional_root, conditional_manifest, layer, expert, conditional=True) for expert in source}
+    heldout = _all_expert_batches(
+        heldout_root, heldout_manifest, layer, tuple(source), conditional=False,
+    )
+    conditional = _all_expert_batches(
+        conditional_root, conditional_manifest, layer, tuple(source), conditional=True,
+    )
     producer = CorrectedPinnedGSSProducer(codec)
     seed = str(config["transform_seed_sha256"])
     proposal_rows = []

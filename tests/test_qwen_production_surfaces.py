@@ -1,3 +1,5 @@
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import json
@@ -11,6 +13,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("safetensors")
 from safetensors.torch import save_file
 
+from quant_pipeline.calibration.fitter import load_fitted_statistics
 from quant_pipeline.calibration.qwen_capture import (
     CaptureWindow,
     capture_loaded_qwen,
@@ -35,6 +38,7 @@ from quant_pipeline.checkpoint.official_btx import (
 )
 from quant_pipeline.core.artifacts import canonical_json, sha256_bytes, sha256_file, write_json
 from quant_pipeline.campaign.qwen_adapter import _independent_kld, _verify_checkpoint_audit
+from quant_pipeline.campaign.qwen_services import CAPTURE_SERVICE_SCHEMA, QwenFitterService
 from quant_pipeline.campaign.runner import StageRequest
 
 
@@ -219,6 +223,95 @@ def test_capture_resume_quarantines_orphan_chunk_and_rejects_request_drift(tmp_p
             predecessor_state_hash=H,
             output_dir=root,
         )
+
+
+def test_qwen_fitter_service_streams_one_layer_and_retains_only_objective_power(tmp_path):
+    model = TinyModel().eval()
+    windows = []
+    for index in range(4):
+        token_ids = tuple(range(1 + index * 4, 5 + index * 4))
+        windows.append(CaptureWindow(
+            token_ids,
+            sha256_bytes(canonical_json(list(token_ids))),
+            "packed-doc",
+            0,
+        ))
+    stage = tmp_path / "fit_capture"
+    capture_root = stage / "fit"
+    manifest = capture_loaded_qwen(
+        model=model,
+        windows=windows,
+        role="fit",
+        layers=[0, 1],
+        predecessor_state_hash=H,
+        output_dir=capture_root,
+        writer_workers=2,
+        max_inflight_chunks=4,
+    )
+    service = {
+        "schema": CAPTURE_SERVICE_SCHEMA,
+        "predecessor_state_hash": H,
+        "layers": [0, 1],
+        "captures": {
+            "fit": {
+                "role": "fit",
+                "manifest": "fit/capture-manifest.json",
+                "capture_sha256": manifest["capture_sha256"],
+            }
+        },
+        "streaming": "one-window-one-layer-chunk",
+        "retention": "sealed-chunks",
+    }
+    service["capture_service_sha256"] = sha256_bytes(canonical_json(service))
+    write_json(stage / "capture-service-manifest.json", service)
+    write_json(stage / "stage-manifest.json", {
+        "provider_result": {"capture_manifest_file": "capture-service-manifest.json"}
+    })
+    config = {
+        "model_revision": "a" * 40,
+        "dataset_revision": "b" * 40,
+        "route_weight_power": 2,
+        "retained_powers": [2],
+        "retained_accounting": ["combined"],
+        "covariance_mode": "full",
+    }
+    output = tmp_path / "fit"
+    result = QwenFitterService(config | {
+        "fitter_backend": "torch_full_p2",
+        "fitter_device": "cpu",
+    }).fit({
+        "kind": "fit",
+        "layer": 0,
+        "output_dir": str(output),
+        "dependencies": {"fit_capture": str(stage)},
+        "predecessor_state_hash": H,
+        "input_identities": {"source_checkpoint": H},
+    })
+    fitted = json.loads((output / result["fit_manifest_file"]).read_text())
+    assert fitted["layers"] == [0]
+    assert fitted["estimator"]["retained_powers"] == [2]
+    assert fitted["estimator"]["covariance_mode"] == "full"
+    assert fitted["estimator"]["fitter_backend"] == "torch_full_p2"
+    assert {row["layer"] for row in fitted["statistics"]} == {0}
+    assert len(fitted["statistics"]) == 2
+    for row in fitted["statistics"]:
+        arrays = load_fitted_statistics(output / row["gate_up"]).arrays
+        assert set(arrays) == {"combined.p2.mean", "combined.p2.second_moment"}
+    reference_output = tmp_path / "fit-reference"
+    reference = QwenFitterService(config | {"fitter_backend": "numpy_full"}).fit({
+        "kind": "fit",
+        "layer": 0,
+        "output_dir": str(reference_output),
+        "dependencies": {"fit_capture": str(stage)},
+        "predecessor_state_hash": H,
+        "input_identities": {"source_checkpoint": H},
+    })
+    reference_manifest = json.loads((reference_output / reference["fit_manifest_file"]).read_text())
+    for observed_row, reference_row in zip(fitted["statistics"], reference_manifest["statistics"], strict=True):
+        observed = load_fitted_statistics(output / observed_row["gate_up"]).arrays
+        expected = load_fitted_statistics(reference_output / reference_row["gate_up"]).arrays
+        for name in observed:
+            np.testing.assert_allclose(observed[name], expected[name], rtol=1e-6, atol=1e-6)
 
 
 def test_multi_role_local_capture_loads_and_replays_model_once(tmp_path, monkeypatch):
@@ -456,7 +549,7 @@ def _source_checkpoint(root: Path):
 
 def test_payload_install_replay_emit_reload_and_corruption(tmp_path):
     source = tmp_path / "source"
-    source_tensors = _source_checkpoint(source)
+    _source_checkpoint(source)
     shared_gu = torch.tensor([1, -1, 1, -1], dtype=torch.float16)
     shared_down = torch.tensor([-1, 1, -1, 1], dtype=torch.float16)
     selected = [_choice(expert, projection, shared_gu, shared_down) for expert in range(2) for projection in ("gate_proj", "up_proj", "down_proj")]

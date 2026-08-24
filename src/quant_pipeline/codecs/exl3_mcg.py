@@ -67,6 +67,13 @@ class Exl3MCGCodec:
         if not closure_files:
             raise FileNotFoundError("corrected codec Python package is empty")
         closure = {name: sha256_file(package_root / name) for name in closure_files}
+        self._closure_stat = {
+            name: (
+                (package_root / name).stat().st_size,
+                (package_root / name).stat().st_mtime_ns,
+            )
+            for name in closure_files
+        }
         try:
             import torch
 
@@ -102,9 +109,18 @@ class Exl3MCGCodec:
         }
 
     def _codec(self):
-        for filename, expected in self.identity["python_closure_sha256"].items():
-            if sha256_file(self.source_root / "r7_encoder" / filename) != expected:
-                raise RuntimeError(f"sealed EXL3/MCG Python closure drifted: {filename}")
+        current_stat = {
+            filename: (
+                (self.source_root / "r7_encoder" / filename).stat().st_size,
+                (self.source_root / "r7_encoder" / filename).stat().st_mtime_ns,
+            )
+            for filename in self.identity["python_closure_sha256"]
+        }
+        if current_stat != self._closure_stat:
+            for filename, expected in self.identity["python_closure_sha256"].items():
+                if sha256_file(self.source_root / "r7_encoder" / filename) != expected:
+                    raise RuntimeError(f"sealed EXL3/MCG Python closure drifted: {filename}")
+            self._closure_stat = current_stat
         if self._codec_instance is not None:
             return self._codec_instance
         root = str(self.source_root)

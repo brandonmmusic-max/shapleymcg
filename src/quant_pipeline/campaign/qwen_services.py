@@ -18,13 +18,26 @@ import importlib
 import inspect
 import math
 import re
+import copy
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-from ..calibration.fitter import CalibrationBatch, CalibrationFitter, save_fitted_statistics
+from ..calibration.fitter import (
+    ACCOUNTING_KINDS,
+    CalibrationBatch,
+    CalibrationFitter,
+    FittedExpertStatistics,
+    ROUTE_WEIGHT_POWERS,
+    SCHEMA as CALIBRATION_FIT_SCHEMA,
+    STORED_ARRAY_FIELDS,
+    _oas_style_identity_shrinkage,
+    save_fitted_statistics,
+    verify_fitted_statistics,
+)
 from ..calibration.qwen_capture import (
     capture_roles_from_local_bf16,
     verify_capture_chunk,
@@ -341,16 +354,155 @@ class QwenRouteCaptureService:
         }
 
 
+def _full_p2_accounting_shell(
+    *,
+    layer: int,
+    expert: int,
+    projection: str,
+    hidden_size: int,
+    predecessor_checkpoint_hash: str,
+    source_identities: Mapping[str, str],
+    route_weights: Sequence[np.ndarray],
+    document_ids: Sequence[Sequence[str]],
+    token_offsets: Sequence[np.ndarray],
+    regularization_floor: float,
+) -> FittedExpertStatistics:
+    """Build exact scalar/sample accounting without a redundant covariance pass."""
+
+    weights = np.concatenate(route_weights).astype(np.float64, copy=False)
+    documents = [item for batch in document_ids for item in batch]
+    offsets = np.concatenate(token_offsets).astype(np.int64, copy=False)
+    if weights.ndim != 1 or len(weights) != len(documents) or len(weights) != len(offsets) or not len(weights):
+        raise ValueError("full-p2 accounting rows are empty or misaligned")
+    sample_keys = sorted(f"{document}\0{int(offset)}" for document, offset in zip(documents, offsets, strict=True))
+    if len(set(sample_keys)) != len(sample_keys):
+        raise ValueError("full-p2 accounting contains duplicate routed sample identities")
+    sample_sha = sha256_bytes(canonical_json(sample_keys))
+    empty_sha = sha256_bytes(canonical_json([]))
+    accounting: dict[str, Any] = {}
+    for kind in ACCOUNTING_KINDS:
+        populated = kind in {"natural", "combined"}
+        powers = {}
+        for power in ROUTE_WEIGHT_POWERS:
+            powered = np.power(weights, power, dtype=np.float64) if populated else np.empty(0, dtype=np.float64)
+            weight_sum = float(powered.sum(dtype=np.float64))
+            weight_square_sum = float(np.dot(powered, powered))
+            powers[str(power)] = {
+                "matrix_retained": kind == "combined" and power == 2,
+                "count": len(weights) if populated else 0,
+                "document_count": len(set(documents)) if populated else 0,
+                "sample_count": len(weights) if populated else 0,
+                "sample_keys_sha256": sample_sha if populated else empty_sha,
+                "weight_sum": weight_sum,
+                "weight_square_sum": weight_square_sum,
+                "effective_sample_size": weight_sum * weight_sum / weight_square_sum if weight_square_sum else 0.0,
+                "shrinkage_coefficient": None,
+                "shrinkage_target": "scaled_identity",
+                "shrinkage_target_scale": None,
+            }
+        accounting[kind] = {"powers": powers}
+    metadata = {
+        "schema": CALIBRATION_FIT_SCHEMA,
+        "identity": {
+            "layer_id": layer,
+            "expert_id": str(expert),
+            "projection": projection,
+            "hidden_size": hidden_size,
+            "predecessor_checkpoint_hash": predecessor_checkpoint_hash,
+            "source_identities": dict(sorted(source_identities.items())),
+        },
+        "estimator": {
+            "accumulator_dtype": "float64",
+            "artifact_array_dtype": "float32",
+            "merge_comparison_tolerance": {"rtol": 1e-12, "atol": 1e-12},
+            "covariance": "centered_diagnostic_derived_from_persisted_raw_second_moment",
+            "route_weight_powers": list(ROUTE_WEIGHT_POWERS),
+            "retained_accounting": ["combined"],
+            "retained_powers": [2],
+            "covariance_mode": "full",
+            "block_size": 128,
+            "stored_array_fields": list(STORED_ARRAY_FIELDS),
+            "derived_array_fields": ["regularized_covariance", "regularized_second_moment"],
+            "supplemental_correction": "inverse_inclusion_probability",
+            "combined_accounting": "natural_plus_supplemental_corrected",
+            "regularization": "oas_style_heuristic_scaled_identity_for_weighted_routed_moments",
+            "regularization_floor": regularization_floor,
+        },
+        "accounting": accounting,
+    }
+    return FittedExpertStatistics(metadata=metadata, arrays={})
+
+
+def _torch_full_p2_statistics(
+    accounting: FittedExpertStatistics,
+    values: Sequence[np.ndarray],
+    route_weights: Sequence[np.ndarray],
+    *,
+    device: str,
+) -> FittedExpertStatistics:
+    """Replace a cheap accounting fit with deterministic full-p2 Torch GEMM."""
+
+    import torch
+
+    if not values or len(values) != len(route_weights):
+        raise ValueError("Torch full-p2 fitting requires matched routed values and weights")
+    x_cpu = np.concatenate(values, axis=0).astype(np.float64, copy=False)
+    w_cpu = np.concatenate(route_weights, axis=0).astype(np.float64, copy=False)
+    if x_cpu.ndim != 2 or w_cpu.ndim != 1 or len(x_cpu) != len(w_cpu):
+        raise ValueError("Torch full-p2 routed rows are malformed")
+    x = torch.from_numpy(x_cpu).to(device=device, dtype=torch.float64)
+    weights = torch.from_numpy(w_cpu).to(device=device, dtype=torch.float64).square()
+    weight_sum = weights.sum()
+    if not bool(torch.isfinite(weight_sum)) or float(weight_sum) <= 0.0:
+        raise ValueError("Torch full-p2 route mass must be finite and positive")
+    mean = torch.einsum("n,nd->d", weights, x) / weight_sum
+    second = x.T.matmul(x * weights[:, None]) / weight_sum
+    second = (second + second.T) * 0.5
+    arrays = {
+        "combined.p2.mean": mean.to(torch.float32).cpu().numpy(),
+        "combined.p2.second_moment": second.to(torch.float32).cpu().numpy(),
+    }
+    metadata = copy.deepcopy(accounting.metadata)
+    metadata["estimator"]["covariance_mode"] = "full"
+    stored_mean = arrays["combined.p2.mean"].astype(np.float64)
+    stored_second = arrays["combined.p2.second_moment"].astype(np.float64)
+    covariance = (stored_second - np.outer(stored_mean, stored_mean))
+    covariance = (covariance + covariance.T) * 0.5
+    record = metadata["accounting"]["combined"]["powers"]["2"]
+    alpha, target_scale, _regularized = _oas_style_identity_shrinkage(
+        covariance,
+        float(record["effective_sample_size"]),
+        float(metadata["estimator"]["regularization_floor"]),
+        dimension=int(metadata["identity"]["hidden_size"]),
+        covariance_mode="full",
+    )
+    record["shrinkage_coefficient"] = alpha
+    record["shrinkage_target_scale"] = target_scale
+    result = FittedExpertStatistics(metadata=metadata, arrays=arrays)
+    verify_fitted_statistics(result)
+    del x, weights, mean, second
+    return result
+
+
 class QwenFitterService:
     def __init__(self, config: Mapping[str, Any]) -> None:
         self.config = dict(config)
 
     def identity(self) -> Mapping[str, Any]:
+        route_power = int(self.config.get("route_weight_power", 2))
+        retained_powers = tuple(int(value) for value in self.config.get("retained_powers", (route_power,)))
+        backend = str(self.config.get("fitter_backend", "numpy_full"))
         return {
             "schema": SERVICE_SCHEMA,
             "provider": "qwen-route-aware-fitter",
             "statistic": "direct-raw-second-moment",
-            "powers": [0, 1, 2],
+            "accounted_powers": [0, 1, 2],
+            "retained_powers": list(retained_powers),
+            "retained_accounting": list(self.config.get("retained_accounting", ("combined",))),
+            "covariance_mode": str(self.config.get("covariance_mode", "full")),
+            "artifact_dtype": str(self.config.get("artifact_dtype", "float32")),
+            "fitter_backend": backend,
+            "fitter_device": str(self.config.get("fitter_device", "cpu")),
         }
 
     def fit(self, context: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -364,7 +516,10 @@ class QwenFitterService:
             raise ValueError("capture service manifest seal mismatch")
         fit_component = service_capture["captures"]["fit"]
         fit_capture_root = capture_file.parent / fit_component["manifest"].rsplit("/", 1)[0]
-        manifest = verify_capture_manifest(fit_capture_root)
+        # Every consumed chunk is verified by _tensor_file below. Avoid a
+        # campaign-wide readback here so a one-layer streaming fit audits only
+        # the bytes it actually consumes rather than rereading all 48 layers.
+        manifest = verify_capture_manifest(fit_capture_root, verify_chunks=False)
         output = _output(context)
         denominator = int(self.config.get("route_weight_denominator", 1 << 24))
         tolerance = float(self.config.get("route_weight_tolerance", 0.5 / denominator + 1e-12))
@@ -376,6 +531,32 @@ class QwenFitterService:
             "model_revision": str(self.config["model_revision"]),
             "dataset_revision": str(self.config["dataset_revision"]),
         }
+        route_power = int(self.config.get("route_weight_power", 2))
+        retained_powers = tuple(int(value) for value in self.config.get("retained_powers", (route_power,)))
+        if route_power not in retained_powers:
+            raise ValueError("retained_powers must include the configured route_weight_power")
+        fitter_options = {
+            "regularization_floor": float(self.config.get("regularization_floor", 1e-12)),
+            "retained_accounting": tuple(self.config.get("retained_accounting", ("combined",))),
+            "retained_powers": retained_powers,
+            "covariance_mode": str(self.config.get("covariance_mode", "full")),
+            "block_size": int(self.config.get("covariance_block_size", 128)),
+            "artifact_dtype": str(self.config.get("artifact_dtype", "float32")),
+        }
+        fitter_backend = str(self.config.get("fitter_backend", "numpy_full"))
+        if fitter_backend not in {"numpy_full", "torch_full_p2"}:
+            raise ValueError("fitter_backend must be numpy_full or torch_full_p2")
+        if fitter_backend == "torch_full_p2" and (
+            route_power != 2
+            or retained_powers != (2,)
+            or tuple(fitter_options["retained_accounting"]) != ("combined",)
+            or fitter_options["covariance_mode"] != "full"
+            or fitter_options["artifact_dtype"] != "float32"
+            or cold_min != 0
+        ):
+            raise ValueError(
+                "torch_full_p2 requires the natural-only competitive combined/full/FP32 p2 estimator"
+            )
         fit_inventory: list[dict[str, Any]] = []
         route_audits: list[dict[str, Any]] = []
         experts = list(range(int(manifest["geometry"]["experts"])))
@@ -385,27 +566,51 @@ class QwenFitterService:
         inclusion_numerator = int(self.config.get("supplemental_inclusion_numerator", 1))
         inclusion_denominator = int(self.config.get("supplemental_inclusion_denominator", 1))
         if supplemental_component is not None:
+            if fitter_backend == "torch_full_p2":
+                raise ValueError("torch_full_p2 does not admit supplemental rows in this experiment")
             supplemental_root = capture_file.parent / supplemental_component["manifest"].rsplit("/", 1)[0]
-            supplemental_manifest = verify_capture_manifest(supplemental_root)
+            supplemental_manifest = verify_capture_manifest(supplemental_root, verify_chunks=False)
             if supplemental_manifest["layers"] != manifest["layers"] or supplemental_manifest["geometry"] != manifest["geometry"]:
                 raise ValueError("supplemental and natural capture geometry/layer inventory differ")
             if not 0 < inclusion_numerator <= inclusion_denominator:
                 raise ValueError("supplemental inclusion probability must be an exact rational in (0,1]")
-        for raw_layer in manifest["layers"]:
-            layer = int(raw_layer)
-            gate_up = CalibrationFitter(
-                layer_id=layer,
-                projection="gate_up_input",
-                hidden_size=int(manifest["geometry"]["hidden_size"]),
-                predecessor_checkpoint_hash=context["predecessor_state_hash"],
-                source_identities=source_ids,
-            )
-            down = CalibrationFitter(
-                layer_id=layer,
-                projection="down_input",
-                hidden_size=int(manifest["geometry"]["intermediate_size"]),
-                predecessor_checkpoint_hash=context["predecessor_state_hash"],
-                source_identities=source_ids,
+        captured_layers = tuple(int(value) for value in manifest["layers"])
+        if context.get("layer") is None:
+            target_layers = captured_layers
+        else:
+            requested_layer = int(context["layer"])
+            if requested_layer not in captured_layers:
+                raise ValueError(f"requested fit layer {requested_layer} is absent from capture")
+            target_layers = (requested_layer,)
+        for layer in target_layers:
+            gate_up = None
+            down = None
+            if fitter_backend == "numpy_full":
+                gate_up = CalibrationFitter(
+                    layer_id=layer,
+                    projection="gate_up_input",
+                    hidden_size=int(manifest["geometry"]["hidden_size"]),
+                    predecessor_checkpoint_hash=context["predecessor_state_hash"],
+                    source_identities=source_ids,
+                    **fitter_options,
+                )
+                down = CalibrationFitter(
+                    layer_id=layer,
+                    projection="down_input",
+                    hidden_size=int(manifest["geometry"]["intermediate_size"]),
+                    predecessor_checkpoint_hash=context["predecessor_state_hash"],
+                    source_identities=source_ids,
+                    **fitter_options,
+                )
+            torch_values: dict[str, dict[int, list[np.ndarray]]] = {
+                "gate_up": defaultdict(list),
+                "down": defaultdict(list),
+            }
+            torch_weights: dict[int, list[np.ndarray]] = defaultdict(list)
+            torch_documents: dict[int, list[list[str]]] = defaultdict(list)
+            torch_offsets: dict[int, list[np.ndarray]] = defaultdict(list)
+            torch_route_mass: dict[int, dict[str, int]] = defaultdict(
+                lambda: {"count": 0, "weight_units": 0, "weight_square_units": 0}
             )
             natural_rows: list[RouteMassRow] = []
             supplemental_rows: list[RouteMassRow] = []
@@ -415,10 +620,15 @@ class QwenFitterService:
                 metadata, tensors = _tensor_file(root / record["file"])
                 expert_ids = tensors["assignment_expert_ids"].numpy().astype(np.int64)
                 offsets = tensors["assignment_token_offsets"].numpy().astype(np.int64)
-                weights = tensors["assignment_router_weights"].numpy().astype(np.float64)
+                # The fitter contract intentionally requires the captured FP32
+                # route weights. It promotes internally for float64 moments;
+                # pre-promoting here would both violate the contract and hide
+                # accidental capture dtype drift.
+                weights = tensors["assignment_router_weights"].numpy().astype(np.float32, copy=False)
                 hidden_values = tensors["routed_hidden_states"].float().numpy()
                 down_values = tensors["routed_down_inputs"].float().numpy()
-                documents = [str(metadata["document_id"])] * len(expert_ids)
+                window_document = f"{metadata['document_id']}@{metadata['token_sha256']}"
+                documents = [window_document] * len(expert_ids)
                 absolute_offsets = offsets + int(metadata["start_token"])
                 common = {
                     "expert_ids": expert_ids,
@@ -430,53 +640,115 @@ class QwenFitterService:
                     "origins": origin,
                 }
                 if origin == "natural":
-                    gate_up.update(CalibrationBatch(expert_inputs=hidden_values, projection="gate_up_input", **common))
-                    down.update(CalibrationBatch(expert_inputs=down_values, projection="down_input", **common))
-                for index, (expert, offset, weight) in enumerate(zip(expert_ids, absolute_offsets, weights, strict=True)):
-                    units = _quantize_route_weight(float(weight), denominator, tolerance)
-                    for role in ("gate_up", "down"):
-                        row = RouteMassRow(
-                            int(expert), role, str(metadata["document_id"]), int(offset), units,
-                            origin=origin,
-                            inclusion_numerator=inclusion_numerator if origin == "supplemental" else 1,
-                            inclusion_denominator=inclusion_denominator if origin == "supplemental" else 1,
-                        )
-                        (natural_rows if origin == "natural" else supplemental_rows).append(row)
-                        if origin == "supplemental":
-                            value = hidden_values[index] if role == "gate_up" else down_values[index]
-                            supplemental_values[row.row_identity] = (value, float(weight), str(metadata["document_id"]), int(offset))
+                    if fitter_backend == "torch_full_p2":
+                        scaled = weights.astype(np.float64) * denominator
+                        units = np.rint(scaled).astype(np.int64)
+                        if (
+                            np.any(units < 1)
+                            or np.any(units > denominator)
+                            or np.any(np.abs(weights.astype(np.float64) - units / denominator) > tolerance)
+                        ):
+                            raise ValueError("captured router weights violate the exact integer audit grid")
+                        for expert in np.unique(expert_ids):
+                            selected = expert_ids == expert
+                            selected_count = int(selected.sum())
+                            torch_values["gate_up"][int(expert)].append(np.ascontiguousarray(hidden_values[selected]))
+                            torch_values["down"][int(expert)].append(np.ascontiguousarray(down_values[selected]))
+                            torch_weights[int(expert)].append(np.ascontiguousarray(weights[selected]))
+                            torch_documents[int(expert)].append([window_document] * selected_count)
+                            torch_offsets[int(expert)].append(np.ascontiguousarray(absolute_offsets[selected]))
+                            expert_units = units[selected]
+                            mass = torch_route_mass[int(expert)]
+                            mass["count"] += selected_count
+                            mass["weight_units"] += int(expert_units.sum(dtype=np.int64))
+                            mass["weight_square_units"] += int(
+                                np.dot(expert_units.astype(object), expert_units.astype(object))
+                            )
+                    else:
+                        assert gate_up is not None and down is not None
+                        gate_up.update(CalibrationBatch(expert_inputs=hidden_values, projection="gate_up_input", **common))
+                        down.update(CalibrationBatch(expert_inputs=down_values, projection="down_input", **common))
+                if fitter_backend != "torch_full_p2":
+                    for index, (expert, offset, weight) in enumerate(
+                        zip(expert_ids, absolute_offsets, weights, strict=True)
+                    ):
+                        units = _quantize_route_weight(float(weight), denominator, tolerance)
+                        for role in ("gate_up", "down"):
+                            row = RouteMassRow(
+                                int(expert), role, window_document, int(offset), units,
+                                origin=origin,
+                                inclusion_numerator=inclusion_numerator if origin == "supplemental" else 1,
+                                inclusion_denominator=inclusion_denominator if origin == "supplemental" else 1,
+                            )
+                            (natural_rows if origin == "natural" else supplemental_rows).append(row)
+                            if origin == "supplemental":
+                                value = hidden_values[index] if role == "gate_up" else down_values[index]
+                                supplemental_values[row.row_identity] = (
+                                    value, float(weight), window_document, int(offset)
+                                )
 
             for record in manifest["records"][str(layer)]:
                 consume(record, fit_capture_root, origin="natural")
             if supplemental_manifest is not None and supplemental_root is not None:
                 for record in supplemental_manifest["records"][str(layer)]:
                     consume(record, supplemental_root, origin="supplemental")
-            role_identity = {
-                role: _hash_json(sorted(row.row_identity for row in (*natural_rows, *supplemental_rows) if row.role == role))
-                for role in ("gate_up", "down")
-            }
-            audit = build_route_mass_audit(
-                natural_rows=natural_rows,
-                supplemental_pool=supplemental_rows,
-                expert_ids=experts,
-                unit_denominator=denominator,
-                cold_expert_min_weight_units=cold_min,
-                topup_seed_sha256=seed_hash,
-                role_row_identity_sha256=role_identity,
-            )
-            selected_by_role = {
-                role: {
-                    identity
-                    for row in audit.metadata["accounting"] if row["role"] == role
-                    for identity in row["supplemental_row_identities"]
+            if fitter_backend == "torch_full_p2":
+                compact_accounting = [
+                    {"expert_id": str(expert), **torch_route_mass[expert]}
+                    for expert in experts
+                ]
+                compact_audit = {
+                    "schema": "quant-pipeline.route-mass-natural-compact.v1",
+                    "identity": {
+                        "capture_sha256": manifest["capture_sha256"],
+                        "layer": layer,
+                        "expert_ids": [str(expert) for expert in experts],
+                        "roles": ["gate_up", "down"],
+                        "unit_denominator": denominator,
+                    },
+                    "policy": {
+                        "powers": [0, 1, 2],
+                        "accounting": "natural-only-exact-integer-power-sums",
+                        "cold_expert_min_weight_units": 0,
+                        "supplemental_rows": 0,
+                    },
+                    "accounting": compact_accounting,
                 }
-                for role in ("gate_up", "down")
-            }
+                compact_audit["audit_sha256"] = _hash_json(compact_audit)
+                selected_by_role = {"gate_up": set(), "down": set()}
+            else:
+                role_identity = {
+                    role: _hash_json(sorted(
+                        row.row_identity
+                        for row in (*natural_rows, *supplemental_rows)
+                        if row.role == role
+                    ))
+                    for role in ("gate_up", "down")
+                }
+                audit = build_route_mass_audit(
+                    natural_rows=natural_rows,
+                    supplemental_pool=supplemental_rows,
+                    expert_ids=experts,
+                    unit_denominator=denominator,
+                    cold_expert_min_weight_units=cold_min,
+                    topup_seed_sha256=seed_hash,
+                    role_row_identity_sha256=role_identity,
+                )
+                selected_by_role = {
+                    role: {
+                        identity
+                        for row in audit.metadata["accounting"] if row["role"] == role
+                        for identity in row["supplemental_row_identities"]
+                    }
+                    for role in ("gate_up", "down")
+                }
             inclusion = inclusion_numerator / inclusion_denominator
             for role, fitter in (("gate_up", gate_up), ("down", down)):
                 selected = sorted(selected_by_role[role])
                 if not selected:
                     continue
+                if fitter is None:
+                    raise AssertionError("supplemental rows reached the torch_full_p2 fitter")
                 values = np.stack([supplemental_values[identity][0] for identity in selected])
                 weights = np.asarray([supplemental_values[identity][1] for identity in selected], dtype=np.float64)
                 documents = [supplemental_values[identity][2] for identity in selected]
@@ -494,9 +766,21 @@ class QwenFitterService:
                     origins="supplemental",
                     inclusion_probabilities=np.full(len(selected), inclusion, dtype=np.float64),
                 ))
-            route_audits.append({"layer": layer, "audit": audit.metadata, "audit_sha256": audit.content_sha256})
-            observed = set(gate_up.expert_ids) & set(down.expert_ids)
-            missing = [str(expert) for expert in experts if str(expert) not in observed]
+            if fitter_backend == "torch_full_p2":
+                route_audits.append({"layer": layer, "audit": compact_audit})
+            else:
+                route_audits.append({
+                    "layer": layer,
+                    "audit": audit.metadata,
+                    "audit_sha256": audit.content_sha256,
+                })
+            if fitter_backend == "torch_full_p2":
+                observed = set(torch_weights) & set(torch_values["gate_up"]) & set(torch_values["down"])
+                missing = [str(expert) for expert in experts if expert not in observed]
+            else:
+                assert gate_up is not None and down is not None
+                observed = set(gate_up.expert_ids) & set(down.expert_ids)
+                missing = [str(expert) for expert in experts if str(expert) not in observed]
             if missing:
                 raise ValueError(
                     f"capture has no natural or selected supplemental support for layer {layer} experts {missing[:8]}"
@@ -504,8 +788,44 @@ class QwenFitterService:
             for expert in experts:
                 gate_path = output / f"layer-{layer:03d}" / f"expert-{expert:03d}" / "gate-up"
                 down_path = output / f"layer-{layer:03d}" / f"expert-{expert:03d}" / "down"
-                save_fitted_statistics(gate_path, gate_up.finalize(expert))
-                save_fitted_statistics(down_path, down.finalize(expert))
+                if fitter_backend == "torch_full_p2":
+                    device = str(self.config.get("fitter_device", "cuda:0"))
+                    shell_options = {
+                        "layer": layer,
+                        "expert": expert,
+                        "predecessor_checkpoint_hash": context["predecessor_state_hash"],
+                        "source_identities": source_ids,
+                        "route_weights": torch_weights[expert],
+                        "document_ids": torch_documents[expert],
+                        "token_offsets": torch_offsets[expert],
+                        "regularization_floor": float(fitter_options["regularization_floor"]),
+                    }
+                    gate_result = _torch_full_p2_statistics(
+                        _full_p2_accounting_shell(
+                            projection="gate_up_input",
+                            hidden_size=int(manifest["geometry"]["hidden_size"]),
+                            **shell_options,
+                        ),
+                        torch_values["gate_up"][expert],
+                        torch_weights[expert],
+                        device=device,
+                    )
+                    down_result = _torch_full_p2_statistics(
+                        _full_p2_accounting_shell(
+                            projection="down_input",
+                            hidden_size=int(manifest["geometry"]["intermediate_size"]),
+                            **shell_options,
+                        ),
+                        torch_values["down"][expert],
+                        torch_weights[expert],
+                        device=device,
+                    )
+                else:
+                    assert gate_up is not None and down is not None
+                    gate_result = gate_up.finalize(expert)
+                    down_result = down.finalize(expert)
+                save_fitted_statistics(gate_path, gate_result)
+                save_fitted_statistics(down_path, down_result)
                 fit_inventory.append({
                     "layer": layer,
                     "expert": expert,
@@ -520,6 +840,14 @@ class QwenFitterService:
             "capture_sha256": manifest["capture_sha256"],
             "capture_service_sha256": service_capture["capture_service_sha256"],
             "source_identities": source_ids,
+            "row_identity_policy": "document-id-plus-token-sha256-plus-captured-offset-v1",
+            "layers": list(target_layers),
+            "estimator": {
+                "route_weight_power": route_power,
+                "fitter_backend": fitter_backend,
+                "fitter_device": str(self.config.get("fitter_device", "cpu")),
+                **{key: list(value) if isinstance(value, tuple) else value for key, value in fitter_options.items()},
+            },
             "route_mass_audits": route_audits,
             "route_mass_audits_sha256": _hash_json(route_audits),
             "prior_controls": {

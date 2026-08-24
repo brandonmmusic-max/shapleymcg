@@ -712,6 +712,7 @@ def verify_capture_manifest(
     root: str | Path,
     *,
     expected_request_sha256: str | None = None,
+    verify_chunks: bool = True,
 ) -> dict[str, Any]:
     root = Path(root)
     manifest = json.loads((root / "capture-manifest.json").read_text())
@@ -730,14 +731,26 @@ def verify_capture_manifest(
         raise ValueError("Qwen routed-capture request identity mismatch")
     if expected_request_sha256 is not None and request_sha256 != _require_hash(expected_request_sha256, "expected capture request"):
         raise ValueError("completed Qwen routed capture belongs to a different request")
-    for rows in manifest.get("records", {}).values():
-        for row in rows:
-            path = root / row["file"]
-            receipt = verify_capture_chunk(path)
-            if receipt.get("metadata", {}).get("capture_request_sha256") != request_sha256:
-                raise ValueError("Qwen routed-capture chunk is bound to a different request")
-            if row["sha256"] != receipt["sha256"] or row["bytes"] != receipt["bytes"]:
-                raise ValueError("Qwen routed-capture record identity mismatch")
+    layers = manifest.get("layers")
+    records = manifest.get("records")
+    if (
+        not isinstance(layers, list)
+        or any(isinstance(layer, bool) or not isinstance(layer, int) or layer < 0 for layer in layers)
+        or len(set(layers)) != len(layers)
+        or not isinstance(records, dict)
+        or set(records) != {str(layer) for layer in layers}
+        or any(not isinstance(rows, list) for rows in records.values())
+    ):
+        raise ValueError("Qwen routed-capture layer/record inventory is malformed")
+    if verify_chunks:
+        for rows in records.values():
+            for row in rows:
+                path = root / row["file"]
+                receipt = verify_capture_chunk(path)
+                if receipt.get("metadata", {}).get("capture_request_sha256") != request_sha256:
+                    raise ValueError("Qwen routed-capture chunk is bound to a different request")
+                if row["sha256"] != receipt["sha256"] or row["bytes"] != receipt["bytes"]:
+                    raise ValueError("Qwen routed-capture record identity mismatch")
     return manifest
 
 
@@ -748,7 +761,7 @@ def load_capture_windows(sealed: Mapping[str, Any], role: str) -> tuple[CaptureW
             token_ids=tuple(row["token_ids"]),
             token_sha256=row["token_sha256"],
             document_id=str(row.get("document_id", row.get("document_sha256", f"window-{index}"))),
-            start_token=int(row.get("start_token", row.get("token_offset", 0))),
+            start_token=int(row.get("start_token", row.get("token_offset", row.get("offset", 0)))),
         )
         for index, row in enumerate(windows)
     )
