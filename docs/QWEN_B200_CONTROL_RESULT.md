@@ -143,19 +143,28 @@ are scored with float32 `KL(reference || student)`, and KV caching is disabled.
 | P99 | 0.5020050489902488 |
 | CVaR95 | 0.4215475404780591 |
 
-The published TurboDerp card reports 0.0688 at 3.0 bpw and 0.0215 at 4.0 bpw.
-EXL3's card bitrate is not routed-expert-only: it is the stored bitrate of body
-`Linear` modules excluding `lm_head`; the head has a separate rate. On that
-scope this control is 3.8838872528 logical bpw and 3.9116533446 payload bpw,
-versus 3.5 logical and 3.5286458333 payload bpw for routed experts alone. Thus
-this result beats the published 3.0-bpw KLD but not the 4.0-bpw rate/quality
-point. The comparison is directional, not strict, because TurboDerp quantized
-the post-trained `Qwen3-30B-A3B` checkpoint while this control quantizes Base.
+The published TurboDerp card reports 0.0688 KLD / 89.44% top-1 agreement at
+3.0 bpw and 0.0215 / 94.33% at 4.0 bpw. Inspection of those exact branches
+shows that the card number is both the routed-expert K and the attention-
+projection K: all 18,432 expert matrices and all 192 attention projections are
+K3 on the 3.0 branch (K4 on the 4.0 branch), while `lm_head` has its separate
+rate and the router remains unquantized. EXL3 also records `bits` as the body-
+linear bitrate. The two descriptions are numerically identical for those
+uniform branches.
+
+This control should therefore be reported first as **3.5 routed-expert logical
+bpw** under the expert-K convention. Because its attention and routers remain
+BF16, its secondary body-linear equivalent is 3.8838872528 logical bpw and
+3.9116533446 payload bpw; routed experts alone are 3.5 logical and
+3.5286458333 payload bpw. Its 0.0500558 KLD and 90.8447% top-1 agreement fall
+between TurboDerp's measured K3 and K4 endpoints. There is no published K3.5
+endpoint on this card, and the post-trained TurboDerp parent differs from this
+Base control, so no strict same-rate winner is claimed.
 
 - Upstream comparison: [`turboderp/Qwen3-30B-A3B-exl3`](https://huggingface.co/turboderp/Qwen3-30B-A3B-exl3)
 - Evaluator source: [`turboderp-org/exllamav3/eval/model_diff.py`](https://github.com/turboderp-org/exllamav3/blob/master/eval/model_diff.py)
 - Panel seal: `6c509f3496d5a1fe6739c58ffa152c3d4202932f9d8a6514e55d17f8a4cfa741`
-- Report seal: `00b9c5a7f88036c3298d8e2884dc23323431416ba1587882aa7f11de19978649`
+- Report seal: `8e9a55f56051ee62a6fd3299ae4344403073864f58d9553cf5bb7dd961d15426`
 - Token-KLD SHA256: `63402eb16197d64fc4d78d6f5110a6fbb1b35a2748875511ace5d93e3605284a`
 
 ## What this result establishes

@@ -270,6 +270,7 @@ def main() -> int:
             "published_parent": "Qwen/Qwen3-30B-A3B (post-trained, not Base)",
             "published_3bpw_kld": TURBODERP_3BPW_KLD,
             "published_4bpw_kld": TURBODERP_4BPW_KLD,
+            "published_rate_semantics": "uniform Qwen branches use the named K for both routed experts and attention projections; EXL3 also records the body-linear stored bitrate under bits",
             "same_dataset_construction": True,
             "same_tokenizer_family": True,
             "strict_head_to_head_valid": False,
