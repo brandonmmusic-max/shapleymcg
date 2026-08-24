@@ -140,6 +140,15 @@ vectors with zero maximum difference. Verification seals are
 `a801e6d5cf750429a2aa1dca9861d937cd973bd785751e116fa8c0657123bf02`
 (MCG).
 
+The three extended trees are published under
+`full-causal-v1/extended-validations-v1` and were independently verified at
+immutable Hugging Face revision
+`3853cebe7d9be9fe3152c944006e4182e843e065`: 66 manifested files and
+64,706,359,331 bytes in total. Hub verification seals are
+`693d1d401b2a3f5e6343bd598ef0b5cbb7e403b3a204e80ccb6988af80123545`,
+`207dae73cc5afb178c152c81f013d8f622c5b3457bf93e2873d54cd87b484d76`,
+and `da7df48d444652bb32bf61d4a0f6d9831732c054c76443691a8f959aaf82fc75`.
+
 ## External paper context
 
 Hill et al. report `0.0353` for their additive method and `0.0429` for their
