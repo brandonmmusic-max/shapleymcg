@@ -122,7 +122,21 @@ def main() -> int:
         (bundle / "bundle-manifest.json").stat().st_size,
         sha256_file(bundle / "bundle-manifest.json"),
     )
-    root = _remote_files(api, args.repo_id, revision, "")
+    # The reproducibility dataset contains tens of thousands of fit/candidate
+    # files.  A recursive root walk just to verify the card can take minutes or
+    # exhaust pagination; inspect only the repository root here.
+    root = {
+        item.path: item
+        for item in api.list_repo_tree(
+            repo_id=args.repo_id,
+            path_in_repo="",
+            recursive=False,
+            expand=True,
+            revision=revision,
+            repo_type="dataset",
+        )
+        if hasattr(item, "size")
+    }
     if "README.md" not in root:
         raise ValueError("Hub root lacks the dataset card")
     _verify_remote_file(
