@@ -4,9 +4,11 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
+from safetensors.numpy import save_file
 from transformers import Qwen3MoeConfig, Qwen3MoeForCausalLM
 
 from quant_pipeline.campaign.qwen_attribution import (
+    load_teacher_logits,
     load_provisional_decoded_weights,
     measure_native_causal_attribution,
     persist_provisional_winner_deltas,
@@ -53,6 +55,24 @@ def _decoded(model):
     # BF16 noise while retaining the same router/top-k control.
     value["down_proj"][0] += 0.2
     return value
+
+
+def test_teacher_loader_accepts_sealed_router_captures_but_requires_logits(tmp_path):
+    expected = np.arange(12, dtype=np.float32).reshape(3, 4)
+    teacher = tmp_path / "teacher.safetensors"
+    save_file(
+        {
+            "logits": expected,
+            "router_logits.layer_000": np.ones((4, 2), dtype=np.float32),
+        },
+        teacher,
+    )
+    assert np.array_equal(load_teacher_logits(teacher), expected)
+
+    missing = tmp_path / "missing-logits.safetensors"
+    save_file({"router_logits.layer_000": np.ones((4, 2), dtype=np.float32)}, missing)
+    with pytest.raises(ValueError, match="must contain a logits tensor"):
+        load_teacher_logits(missing)
 
 
 def test_tiny_real_qwen_native_path_gradient_fisher_closure_and_tamper(tmp_path):

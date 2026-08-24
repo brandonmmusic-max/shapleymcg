@@ -19,6 +19,7 @@ from typing import Any
 import numpy as np
 
 from quant_pipeline.calibration.qwen_capture import qwen_moe_layers
+from quant_pipeline.campaign.qwen_attribution import load_teacher_logits
 from quant_pipeline.core.artifacts import (
     atomic_write,
     canonical_json,
@@ -95,15 +96,6 @@ def _candidate_path(
     if value.stat().st_size != row["candidate_bytes"] or sha256_file(value) != row["candidate_sha256"]:
         raise ValueError(f"downloaded layer {row['layer']} candidate payload drifted")
     return value, True
-
-
-def _teacher(path: Path) -> np.ndarray:
-    from safetensors import safe_open
-
-    with safe_open(path, framework="np") as handle:
-        if set(handle.keys()) != {"logits"}:
-            raise ValueError("teacher safetensors must contain exactly one logits tensor")
-        return np.asarray(handle.get_tensor("logits"))
 
 
 def _capture(model: Any, token_ids: list[int]) -> Any:
@@ -237,7 +229,7 @@ def main() -> int:
     window_root = args.kld_window.resolve()
     window = json.loads((window_root / "kld-window.json").read_text())
     verify_kld_window(window, window_root)
-    teacher = _teacher(args.teacher.resolve())
+    teacher = load_teacher_logits(args.teacher.resolve())
 
     import torch
     from safetensors.torch import save_file

@@ -60,6 +60,19 @@ def _tensor_sha256(value: Any) -> str:
     return sha256_bytes(_tensor_bytes(value))
 
 
+def load_teacher_logits(path: Path) -> np.ndarray:
+    """Load canonical LM logits from a sealed teacher/router capture."""
+    from safetensors import safe_open
+
+    with safe_open(path, framework="np") as handle:
+        # Production teacher captures seal per-layer router logits alongside
+        # the language-model logits.  Their presence is expected and does not
+        # make the canonical KLD target ambiguous.
+        if "logits" not in handle.keys():
+            raise ValueError("teacher safetensors must contain a logits tensor")
+        return np.asarray(handle.get_tensor("logits"))
+
+
 def _dtype(name: str):
     import torch
 

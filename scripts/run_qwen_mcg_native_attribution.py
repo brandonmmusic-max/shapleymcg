@@ -23,6 +23,7 @@ from typing import Any
 import numpy as np
 
 from quant_pipeline.campaign.qwen_attribution import (
+    load_teacher_logits,
     measure_native_causal_attribution,
     verify_attribution_inputs,
     write_attribution_inputs,
@@ -230,15 +231,6 @@ def _load_uniform_k4(
     return decoded
 
 
-def _teacher(path: Path) -> np.ndarray:
-    from safetensors import safe_open
-
-    with safe_open(path, framework="np") as handle:
-        if set(handle.keys()) != {"logits"}:
-            raise ValueError("teacher safetensors must contain only logits")
-        return np.asarray(handle.get_tensor("logits"))
-
-
 def _attribution_document(arrays: dict[str, np.ndarray], inventory_sha256: str) -> dict[str, Any]:
     layers = []
     for index, layer in enumerate(arrays["layer_indices"]):
@@ -347,7 +339,7 @@ def main() -> int:
         model=model,
         token_ids=window["token_ids"],
         decoded_by_layer=decoded,
-        teacher_logits=_teacher(args.teacher.resolve()),
+        teacher_logits=load_teacher_logits(args.teacher.resolve()),
         path_nodes=args.path_nodes,
         fisher_rank=args.fisher_rank,
         seed=args.seed,
