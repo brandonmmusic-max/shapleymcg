@@ -14,6 +14,13 @@ checks. These modules have local synthetic/tiny-model tests. The first full
 exact 3.5-bit MoE expert-weight rate. Its reconstructed-BF16 replay measured
 mean next-token KLD `0.06335949321311507` over 2,047 sealed WikiText positions.
 Every selected matrix payload and the token KLD were independently reverified.
+Two broader comparison panels are also sealed: the reconstructed Hill-paper
+BFCL/RULER panel measured `0.018260861970005038` over 32,752 positions, and the
+TurboDerp/ExLlamaV3 WikiText-2 20k protocol measured `0.05005581795647327`
+over 20,480 positions with `0.908447265625` top-1 agreement. The paper panel is
+not an author-provided token panel, and the published TurboDerp quant uses the
+post-trained Qwen parent rather than Base, so neither is labeled a strict
+head-to-head result.
 See the [complete result and provenance ledger](docs/QWEN_B200_CONTROL_RESULT.md).
 
 This is a validation-model result, not SM100 packed-runtime qualification. The

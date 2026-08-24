@@ -95,6 +95,69 @@ not change the tensors: exact token IDs and hashes were sealed, and fitted
 sample identity included `document_id@token_sha256`. Current code records the
 true sealed offset.
 
+## Additional KLD panels
+
+### Reconstructed Hill-paper BFCL/RULER panel
+
+The paper-source categories and dimensions were reconstructed as 16 disjoint
+2,048-token evaluation sequences: eight BFCL-v3 sequences and eight RULER
+sequences. The paper does not publish its exact row IDs or token IDs, so this is
+explicitly labeled a reconstruction rather than an exact author-panel replay.
+
+| Metric | Value |
+|---|---:|
+| Prediction positions | 32,752 |
+| Mean KLD | 0.018260861970005038 |
+| Sample SD of sequence means | 0.010442577577935023 |
+| Standard error of sequence means | 0.0026106443944837556 |
+| P95 | 0.050585024611849064 |
+| P99 | 0.27827231287309023 |
+| CVaR95 | 0.2612709356943377 |
+
+The nearest same-corpus result in Hill's Qwen3-30B Table 2 is 0.0353 for the
+additive method at 4.2 effective bits. This control has 3.8787878788 logical
+bits in the paper's 240-linear allocation scope. The lower measured value is
+encouraging, but it is **not** a strict claim of beating that paper: this work
+uses `Qwen3-30B-A3B-Base`, mixed K3/K4 expert-weight reconstruction with BF16
+activations, and reconstructed prompts; the paper appears to use the
+post-trained Qwen checkpoint and W4A4 NVFP4.
+
+- Panel seal: `51f6f9d9f6acde8c2fd92c929981aa72ff22b74e38f1c93aebd4914132b8f848`
+- Report seal: `c2c750197107fa308befa502b2e58facc4e12d6de77a7a35fb5fe41460ae8179`
+- Token-KLD SHA256: `032f94568db7c01d4367c282591cacaef9960b2ed180704e9c9d217ad12f4e9b`
+
+### TurboDerp/ExLlamaV3 WikiText-2 20k panel
+
+This control mirrors `eval/model_diff.py`: raw WikiText-2 test text is joined
+with double newlines, tokenized without added special tokens, and divided into
+ten consecutive non-overlapping 2,048-token rows. All 20,480 logits positions
+are scored with float32 `KL(reference || student)`, and KV caching is disabled.
+
+| Metric | Value |
+|---|---:|
+| Logit positions | 20,480 |
+| Mean KLD | 0.05005581795647327 |
+| Top-1 agreement | 0.908447265625 |
+| Sample SD of row means | 0.018849720769000416 |
+| P95 | 0.19061099812388418 |
+| P99 | 0.5020050489902488 |
+| CVaR95 | 0.4215475404780591 |
+
+The published TurboDerp card reports 0.0688 at 3.0 bpw and 0.0215 at 4.0 bpw.
+EXL3's card bitrate is not routed-expert-only: it is the stored bitrate of body
+`Linear` modules excluding `lm_head`; the head has a separate rate. On that
+scope this control is 3.8838872528 logical bpw and 3.9116533446 payload bpw,
+versus 3.5 logical and 3.5286458333 payload bpw for routed experts alone. Thus
+this result beats the published 3.0-bpw KLD but not the 4.0-bpw rate/quality
+point. The comparison is directional, not strict, because TurboDerp quantized
+the post-trained `Qwen3-30B-A3B` checkpoint while this control quantizes Base.
+
+- Upstream comparison: [`turboderp/Qwen3-30B-A3B-exl3`](https://huggingface.co/turboderp/Qwen3-30B-A3B-exl3)
+- Evaluator source: [`turboderp-org/exllamav3/eval/model_diff.py`](https://github.com/turboderp-org/exllamav3/blob/master/eval/model_diff.py)
+- Panel seal: `6c509f3496d5a1fe6739c58ffa152c3d4202932f9d8a6514e55d17f8a4cfa741`
+- Report seal: `00b9c5a7f88036c3298d8e2884dc23323431416ba1587882aa7f11de19978649`
+- Token-KLD SHA256: `63402eb16197d64fc4d78d6f5110a6fbb1b35a2748875511ace5d93e3605284a`
+
 ## What this result establishes
 
 It establishes that the fixed-Hadamard, source-derived absolute-v31,
