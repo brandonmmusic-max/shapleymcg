@@ -280,6 +280,8 @@ def main() -> int:
     report = _read_json(kld_root / "kld-report.json")
     allocation = _read_json(kld_root / "allocation.json")
     independent = _read_json(kld_root / "independent-verification.json")
+    matched_root = artifact_root / "turboderp-wiki2-kld-v1"
+    matched_report = _read_json(matched_root / "kld-report.json")
     naive_root = artifact_root / "naive-3p5-controls-v1"
     naive = _read_json(naive_root / "summary.json")
     model_publication = _read_json(args.model_publication_receipt.resolve())
@@ -287,6 +289,7 @@ def main() -> int:
     _verify_seal(report, "report_sha256", "KLD report")
     _verify_seal(allocation, "allocation_sha256", "allocation")
     _verify_seal(independent, "verification_sha256", "independent KLD verification")
+    _verify_seal(matched_report, "report_sha256", "matched 10x2048 KLD report")
     _verify_seal(naive, "summary_sha256", "score-blind control summary")
     _verify_seal(model_publication, "receipt_sha256", "model publication receipt")
     _verify_seal(
@@ -297,8 +300,9 @@ def main() -> int:
     if (
         naive.get("seeds") != [0, 1, 2, 3, 4]
         or len(naive.get("controls", [])) != 5
-        or naive.get("selected_mean_kld") != report["summary"]["mean"]
-        or naive.get("selected_top1_agreement") != report["top1_agreement"]
+        or naive.get("selected_mean_kld") != matched_report["summary"]["mean"]
+        or naive.get("selected_top1_agreement")
+        != matched_report["top1_agreement"]
     ):
         raise ValueError("score-blind controls are not bound to the selected result")
     published_artifacts = {
@@ -363,6 +367,11 @@ def main() -> int:
         ),
         naive_root / "plan.json": Path("kld/score-blind-controls/plan.json"),
         naive_root / "summary.json": Path("kld/score-blind-controls/summary.json"),
+        matched_root / "panel.json": Path("kld/matched-10x2048/panel.json"),
+        matched_root / "kld-report.json": Path("kld/matched-10x2048/kld-report.json"),
+        matched_root / "independent-verification.json": Path(
+            "kld/matched-10x2048/independent-verification.json"
+        ),
     }
     for control in naive["controls"]:
         label = f"seed-{int(control['seed']):03d}"
@@ -426,6 +435,11 @@ def main() -> int:
         "allocation_sha256": allocation["allocation_sha256"],
         "kld_report_sha256": report["report_sha256"],
         "kld_summary": report["summary"],
+        "matched_10x2048": {
+            "report_sha256": matched_report["report_sha256"],
+            "summary": matched_report["summary"],
+            "top1_agreement": matched_report["top1_agreement"],
+        },
         "score_blind_controls": {
             "summary_sha256": naive["summary_sha256"],
             "mean_kld": naive["naive_mean_kld"],
