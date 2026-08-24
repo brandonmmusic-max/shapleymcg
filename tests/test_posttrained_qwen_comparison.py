@@ -70,3 +70,23 @@ def test_checked_in_naive_control_record_is_sealed():
     assert len(record["controls"]) == 5
     assert record["naive_seeds_beating_selected_kld"] == 0
     assert record["selected_kld_reduction_vs_naive_mean"] > 0.28
+
+
+def test_posttrained_teacher_capture_defaults_to_dry_run(tmp_path):
+    output = tmp_path / "teacher"
+    result = run(
+        "prepare_turboderp_wiki2_teacher.py",
+        "--model",
+        str(tmp_path / "model"),
+        "--model-revision",
+        "4c446470ba0aec43e22ac1128f9ffd915f338ba3",
+        "--source-receipt",
+        str(tmp_path / "source.json"),
+        "--output",
+        str(output),
+    )
+    plan = json.loads(result.stdout)
+    assert plan["dry_run"] is True
+    assert plan["rows"] == 10
+    assert plan["row_length"] == 2048
+    assert not output.exists()

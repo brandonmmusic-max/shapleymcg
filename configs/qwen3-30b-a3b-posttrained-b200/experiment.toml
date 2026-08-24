@@ -1,0 +1,31 @@
+name = "qwen3-30b-a3b-posttrained-turboderp-k4-comparison-v1"
+output_dir = "__REQUIRED_DURABLE_CAMPAIGN_OUTPUT_DIR__"
+
+[model]
+model_id = "Qwen/Qwen3-30B-A3B"
+revision = "4c446470ba0aec43e22ac1128f9ffd915f338ba3"
+family = "qwen3_moe"
+local_path = "__REQUIRED_LOCAL_QWEN_BF16_CHECKPOINT_DIR__"
+trust_remote_code = false
+
+[corpus]
+input_jsonl = "__REQUIRED_LOCAL_CALIBRATION_JSONL__"
+tokenizer_id = "Qwen/Qwen3-30B-A3B"
+window_tokens = 2048
+seed = 20260823
+fit_windows = 32
+selection_windows = 16
+confirmation_windows = 16
+final_windows = 25
+minimum_domains = 4
+
+[codec]
+bits = [3, 4]
+group_size = 128
+symmetric = true
+
+[objective]
+path_nodes = 5
+fisher_rank = 32
+bootstrap_samples = 2000
+reanchor_every_layers = 4
