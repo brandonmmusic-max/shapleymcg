@@ -83,7 +83,7 @@ def _upload_receipts(root: Path, kind: str) -> list[dict]:
     return rows
 
 
-def _card(summary: dict, naive: dict, git_revision: str) -> str:
+def _card(summary: dict, naive: dict, exact_3p5: dict, git_revision: str) -> str:
     arms = summary["arms"]
     order = (
         ("ours-selected-k34", "ShapleyMCG selected K3/K4 experts; dense BF16"),
@@ -139,6 +139,15 @@ to `{naive['naive_max_kld']:.12g}`). The selected allocation measured
 `{naive['selected_mean_kld']:.12g}`; `{naive['naive_seeds_beating_selected_kld']}`
 of five score-blind seeds beat it.
 
+The exact matched 3.5-BPW comparison fixes TurboDerp K4 non-expert weights,
+K6 head, parent, panel, and the same half-K3/half-K4 matrix allocation. The
+TurboDerp reconstruction measured KLD
+`{exact_3p5['arms']['turboderp-selected-k34']['mean_kld']:.12g}`; replacing
+only those expert reconstructions with ShapleyMCG measured
+`{exact_3p5['arms']['hybrid-ours-selected-k34']['mean_kld']:.12g}`. The
+ShapleyMCG relative KLD reduction at identical expert rate is
+`{exact_3p5['ours_kld_reduction_vs_turboderp_at_exact_3p5']:.12g}`.
+
 The bundle includes source/corpus seals, BF16 teacher and student logits,
 per-token KLD arrays, all arm reports, five naive controls, capture manifests,
 and the 48 fit plus 48 candidate Hub receipts. The large fit and candidate
@@ -184,14 +193,19 @@ def main() -> int:
         ("encode-publish-waves.exit", "encode and fit publication"),
         ("matched-k4-evaluation.exit", "matched K4 evaluation"),
         ("naive-controls.exit", "score-blind controls"),
+        ("exact-3p5-comparison.exit", "exact 3.5 BPW comparison"),
         ("hf-candidates.exit", "candidate publication"),
     ):
         _require_zero(run_root / "logs" / name, label)
 
     matched_root = artifact_root / "matched-k4-comparison"
+    exact_root = artifact_root / "matched-3p5-comparison"
     naive_root = artifact_root / "naive-3p5-controls-v1"
     summary = _read_sealed(matched_root / "summary.json", "summary_sha256", "matched result")
     naive = _read_sealed(naive_root / "summary.json", "summary_sha256", "naive controls")
+    exact_3p5 = _read_sealed(
+        exact_root / "summary.json", "summary_sha256", "exact 3.5 BPW comparison"
+    )
     if summary.get("source_revision") != SOURCE_REVISION or naive.get("selected_mean_kld") != summary["arms"]["ours-selected-k34"]["mean_kld"]:
         raise ValueError("post-trained result components are not bound to one selected arm")
     fit_refs = _upload_receipts(run_root / "artifacts/hf-upload/fits", "fit")
@@ -220,10 +234,13 @@ def main() -> int:
         _link_file(source, output / "calibration/captures" / relative)
     _link_tree(artifact_root / "turboderp-wiki2-teacher", output / "evaluation/teacher-panel")
     _link_tree(matched_root, output / "evaluation/matched-k4-comparison")
+    _link_tree(exact_root, output / "evaluation/matched-3p5-comparison")
     _link_tree(naive_root, output / "evaluation/naive-3p5-controls")
     _link_tree(run_root / "artifacts/hf-upload/fits", output / "publication/fit-receipts")
     _link_tree(run_root / "artifacts/hf-upload/candidates", output / "publication/candidate-receipts")
-    (output / "README.md").write_text(_card(summary, naive, args.git_revision))
+    (output / "README.md").write_text(
+        _card(summary, naive, exact_3p5, args.git_revision)
+    )
 
     inventory = _inventory(output, frozenset({"bundle-manifest.json", "SHA256SUMS"}))
     (output / "SHA256SUMS").write_text(
@@ -236,6 +253,7 @@ def main() -> int:
         "turboderp_revision": TURBO_REVISION,
         "matched_summary_sha256": summary["summary_sha256"],
         "naive_summary_sha256": naive["summary_sha256"],
+        "exact_3p5_summary_sha256": exact_3p5["summary_sha256"],
         "fit_layers": fit_refs,
         "candidate_layers": candidate_refs,
         "files": _inventory(output),

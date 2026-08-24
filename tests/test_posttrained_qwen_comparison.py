@@ -270,6 +270,7 @@ def test_posttrained_result_bundle_seals_every_hub_layer(tmp_path):
         "encode-publish-waves.exit",
         "matched-k4-evaluation.exit",
         "naive-controls.exit",
+        "exact-3p5-comparison.exit",
         "hf-candidates.exit",
     ):
         path = run_root / "logs" / name
@@ -333,6 +334,24 @@ def test_posttrained_result_bundle_seals_every_hub_layer(tmp_path):
         },
         "summary_sha256",
     )
+    _write_sealed(
+        artifact_root / "matched-3p5-comparison/summary.json",
+        {
+            "schema": "fixture",
+            "arms": {
+                "turboderp-selected-k34": {
+                    "mean_kld": 0.035,
+                    "top1_agreement": 0.91,
+                },
+                "hybrid-ours-selected-k34": {
+                    "mean_kld": 0.03,
+                    "top1_agreement": 0.92,
+                },
+            },
+            "ours_kld_reduction_vs_turboderp_at_exact_3p5": 1 - 0.03 / 0.035,
+        },
+        "summary_sha256",
+    )
     for kind in ("fits", "candidates"):
         for layer in range(48):
             _write_sealed(
@@ -370,4 +389,5 @@ def test_posttrained_result_bundle_seals_every_hub_layer(tmp_path):
     assert len(manifest["fit_layers"]) == 48
     assert len(manifest["candidate_layers"]) == 48
     assert (output / "evaluation/matched-k4-comparison/summary.json").is_file()
+    assert (output / "evaluation/matched-3p5-comparison/summary.json").is_file()
     assert (output / "evaluation/naive-3p5-controls/summary.json").is_file()

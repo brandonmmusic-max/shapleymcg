@@ -15,6 +15,8 @@ export PATH="$(dirname "${PYTHON}"):${PATH}"
 SOURCE_MODEL=${SOURCE_MODEL:-/models/Qwen3-30B-A3B-post-4c446470}
 SOURCE_REVISION=${SOURCE_REVISION:-4c446470ba0aec43e22ac1128f9ffd915f338ba3}
 TURBODERP_MODEL=${TURBODERP_MODEL:-/models/turboderp-Qwen3-30B-A3B-exl3-K4}
+TURBODERP_K3_MODEL=${TURBODERP_K3_MODEL:-/models/turboderp-Qwen3-30B-A3B-exl3-K3}
+TURBODERP_K3_REVISION=${TURBODERP_K3_REVISION:-45c353c522dedaf4fb68be60423d611b5ff71e26}
 EXLLAMAV3_ROOT=${EXLLAMAV3_ROOT:-/qwen-shapleymcg-run/sources/exllamav3-v0.0.43}
 ENCODING_SITE=${ENCODING_SITE:-/qwen-shapleymcg-run/encoding-site}
 HF_REPO_ID=${HF_REPO_ID:-brandonmusic/shapleymcg-qwen3-30b-a3b-posttrained-reproducibility}
@@ -147,6 +149,32 @@ if ! test -f "${LOG_ROOT}/naive-controls.exit" \
     --execute
 else
     printf 'adopted successful naive controls\n'
+fi
+
+while ! test -f "${LOG_ROOT}/turboderp-k3-download.exit"; do
+    sleep 15
+done
+test "$(tr -d '[:space:]' < "${LOG_ROOT}/turboderp-k3-download.exit")" = 0
+if ! test -f "${LOG_ROOT}/exact-3p5-comparison.exit" \
+    || ! test "$(tr -d '[:space:]' < "${LOG_ROOT}/exact-3p5-comparison.exit")" = 0 \
+    || ! test -s "${ARTIFACT_ROOT}/matched-3p5-comparison/summary.json"; then
+    run_stage exact-3p5-comparison \
+    env CUDA_VISIBLE_DEVICES="${GPU}" "${PYTHON}" \
+    "${CODE_ROOT}/scripts/measure_qwen_turboderp_exact_3p5.py" \
+    --source-model "${SOURCE_MODEL}" \
+    --encode-root "${RUN_ROOT}/fast-encode" \
+    --allocation "${ARTIFACT_ROOT}/matched-k4-comparison/selected-allocation.json" \
+    --panel-root "${ARTIFACT_ROOT}/turboderp-wiki2-teacher" \
+    --turboderp-k3-model "${TURBODERP_K3_MODEL}" \
+    --turboderp-k3-revision "${TURBODERP_K3_REVISION}" \
+    --turboderp-k4-model "${TURBODERP_MODEL}" \
+    --exllamav3-root "${EXLLAMAV3_ROOT}" \
+    --output "${ARTIFACT_ROOT}/matched-3p5-comparison" \
+    --workers 8 \
+    --attention-backend eager \
+    --execute
+else
+    printf 'adopted successful exact 3.5 BPW comparison\n'
 fi
 
 # Publication/deletion remains behind the full remote fit gate even when KLD
