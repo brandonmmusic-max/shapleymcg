@@ -128,6 +128,25 @@ Allocation SHA256: `{allocation['allocation_sha256']}`
 KLD report seal: `{report['report_sha256']}`  
 Independent verification seal: `{verification['verification_sha256']}`
 
+## Same-parent 20k WikiText control
+
+All three rows below use this exact `Qwen3-30B-A3B-Base` parent, the same
+sealed ten-by-2,048-token panel and BF16 teacher logits, and source-BF16
+attention projections, routers, and `lm_head`. Only expert allocation changes.
+
+| Expert allocation | Expert logical BPW | Mean KLD | Top-1 agreement |
+|---|---:|---:|---:|
+| Uniform K3 | 3.0 | 0.09943217778983483 | 0.8728515625 |
+| **ShapleyMCG mixed K3/K4** | **3.5** | **0.05005581795647327** | **0.908447265625** |
+| Uniform K4 | 4.0 | 0.033991548914098856 | 0.922509765625 |
+
+The selected 3.5-bpw mix is **24.9671% below the linear K3/K4 KLD
+midpoint** and **13.8995% below the geometric midpoint**. An independent
+PyTorch `kl_div` replay measured 0.05005581997721873 (about `2e-9` difference
+in the mean; maximum per-token delta `7.152557373046875e-07`) and reproduced
+top-1 exactly. The full sealed logits and reports are in the reproducibility
+dataset linked below.
+
 The full candidates, calibration/Hessian artifacts, teacher and student logits,
 token window, manifests, hashes, and receipts are published in
 [`brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility`](https://huggingface.co/datasets/brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility).
