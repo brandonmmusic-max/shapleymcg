@@ -18,7 +18,16 @@ HF_REPO_ID=${HF_REPO_ID:-brandonmusic/shapleymcg-qwen3-30b-a3b-posttrained-repro
 HF_TOKEN_SOURCE=${HF_TOKEN_SOURCE:-/root/.cache/huggingface/token}
 LOG_ROOT=${LOG_ROOT:-${RUN_ROOT}/logs}
 GPU=${GPU:-0}
+WAIT_FOR_ENCODE=${WAIT_FOR_ENCODE:-0}
 
+if [[ "${WAIT_FOR_ENCODE}" == 1 ]]; then
+    while ! test -f "${LOG_ROOT}/encode-publish-waves.exit"; do
+        sleep 15
+    done
+elif [[ "${WAIT_FOR_ENCODE}" != 0 ]]; then
+    printf 'WAIT_FOR_ENCODE must be 0 or 1\n' >&2
+    exit 2
+fi
 test "$(tr -d '[:space:]' < "${LOG_ROOT}/encode-publish-waves.exit")" = 0
 test -s "${HF_TOKEN_SOURCE}"
 mkdir -p "${LOG_ROOT}"
