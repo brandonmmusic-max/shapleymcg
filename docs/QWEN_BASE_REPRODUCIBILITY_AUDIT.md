@@ -26,7 +26,7 @@ the expanded validation reconstruction to a compact runtime checkpoint.
 ### Reproducibility dataset
 
 - Repository: `brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility`
-- Audited repository head: `e873cd73543ac4b753f4c3571221f10eec38a1b6`
+- Audited repository head: `89b989fc45cba9e841c5083d38c16cd8734041bb`
 - Fixed control folder revision: `c9c2b001dd943b8251fc0102ec76ab1b8d572219`
 - Remote control folder: 53 files, 2,715,887,831 bytes
 - Manifest inventory: 52 files; every row rechecked against remote size and
@@ -40,7 +40,10 @@ the expanded validation reconstruction to a compact runtime checkpoint.
 - Per-layer receipts: 48 fit plus 48 candidate receipts; all internal seals,
   layer identities, repository paths, byte counts, and bundle references match
 - Causal evidence content revision: `a1f669e5b42f041fa28017670fd86b183f5103d0`
-- Final dataset-card revision: `e873cd73543ac4b753f4c3571221f10eec38a1b6`
+- Final dataset-card revision: `89b989fc45cba9e841c5083d38c16cd8734041bb`
+- Validation-model receipt mirror:
+  `causal-arm-v3/validation-model-hf-publication-receipt.json` (remote file
+  SHA-256 `778670c94a6db7d8147d3ee4757064fe3dcf586dfee22765917074be9f8c462a`)
 - Matched causal/control 20k comparison seal:
   `8d8438df03d0f9a34a4a5a79912dd232baa401f24d8e6e14bb942bf00062a608`
 

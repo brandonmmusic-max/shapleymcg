@@ -105,6 +105,8 @@ accounting.
   `c3447f3f8e231ae83afa10ba263346d1ceb98c11`
 - Validation-model publication-receipt revision:
   `fbdd05904fd4018dea9fd0f25ed4800c15df1493`
+- Dataset receipt mirror:
+  `causal-arm-v3/validation-model-hf-publication-receipt.json`
 - Model manifest / publication receipt seals:
   `32fec13a96c6c85eb394939a6eb511c821bd05e8ac0960268852d33150d0cde1` /
   `e7b3b344321c11e872fc006cbd009c935b9fdbf0fdb8b2b0a99197cce14bffe8`

@@ -66,6 +66,8 @@ The exact expanded validation reconstruction is published at
   `32fec13a96c6c85eb394939a6eb511c821bd05e8ac0960268852d33150d0cde1`
 - Publication receipt seal:
   `e7b3b344321c11e872fc006cbd009c935b9fdbf0fdb8b2b0a99197cce14bffe8`
+- Dataset receipt mirror:
+  `causal-arm-v3/validation-model-hf-publication-receipt.json`
 - Verified content inventory: 31 files and 61,079,798,645 bytes; every file
   matched its remote size and either Hub LFS SHA-256 or Git-blob SHA-1.
 - Post-assembly verification: all 18,432 selected expert-matrix
