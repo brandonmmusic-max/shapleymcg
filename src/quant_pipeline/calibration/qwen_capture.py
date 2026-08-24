@@ -694,7 +694,13 @@ def capture_loaded_qwen(
     }
     manifest["capture_sha256"] = sha256_bytes(canonical_json(manifest))
     write_json(root / "capture-manifest.json", manifest)
-    return verify_capture_manifest(root)
+    # Every record admitted above came from a completed writer future, and
+    # _persist_capture_chunk performs a full hash/tensor/numeric readback before
+    # that future resolves.  Re-reading every new chunk again here is therefore
+    # byte-neutral duplicate I/O.  Validate the newly assembled manifest and
+    # record inventory now; the existing-manifest resume branch above retains
+    # the full chunk sweep so data at rest is never trusted after a restart.
+    return verify_capture_manifest(root, verify_chunks=False)
 
 
 def _record(path: Path, window: CaptureWindow, index: int) -> dict[str, Any]:
