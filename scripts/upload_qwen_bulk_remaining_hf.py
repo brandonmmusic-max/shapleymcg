@@ -215,15 +215,33 @@ def main() -> int:
     layers: list[dict] = []
     for root in layer_roots:
         layer = int(root.name.removeprefix("layer-"))
-        encode_receipt = run_root / "fast-encode" / root.name / "encode-receipt.json"
-        encode_exit = run_root / "logs" / f"fast-encode-layer-{layer:03d}.exit"
-        if not encode_receipt.is_file() or not _kld_succeeded(encode_exit):
-            raise ValueError(f"layer {layer} lacks a successful encode gate")
+        if args.kind == "fit":
+            completion_receipt = root / "fit-receipt.json"
+            completion_exit = (
+                run_root / "logs" / f"streaming-fit-layer-{layer:03d}.exit"
+            )
+            completion_key = "fit_receipt_sha256"
+            completion_label = "fit"
+        else:
+            completion_receipt = root / "encode-receipt.json"
+            completion_exit = (
+                run_root / "logs" / f"fast-encode-layer-{layer:03d}.exit"
+            )
+            completion_key = "encode_receipt_sha256"
+            completion_label = "encode"
+        if not completion_receipt.is_file() or not _kld_succeeded(completion_exit):
+            raise ValueError(
+                f"layer {layer} lacks a successful {completion_label} gate"
+            )
         inventory = _inventory(root)
         manifest = {
-            "schema": f"quant-pipeline.qwen-{args.kind}-hf-upload-manifest.v1",
+            "schema": (
+                "quant-pipeline.qwen-fit-hf-upload-manifest.v2"
+                if args.kind == "fit"
+                else "quant-pipeline.qwen-candidate-hf-upload-manifest.v1"
+            ),
             "layer": layer,
-            "encode_receipt_sha256": sha256_file(encode_receipt),
+            completion_key: sha256_file(completion_receipt),
             "file_count": len(inventory),
             "total_bytes": sum(int(row["bytes"]) for row in inventory),
             "files": inventory,
@@ -309,7 +327,11 @@ def main() -> int:
             layer = int(layer_row["layer"])
             manifest = layer_row["manifest"]
             receipt = {
-                "schema": f"quant-pipeline.qwen-{args.kind}-hf-upload-receipt.v1",
+                "schema": (
+                    "quant-pipeline.qwen-fit-hf-upload-receipt.v2"
+                    if args.kind == "fit"
+                    else "quant-pipeline.qwen-candidate-hf-upload-receipt.v1"
+                ),
                 "repo_id": args.repo_id,
                 "repo_type": "dataset",
                 "revision": revision,
@@ -328,6 +350,8 @@ def main() -> int:
                     if args.delete_verified and args.kld_exit
                     else None
                 )
+            else:
+                receipt["fit_receipt_sha256"] = manifest["fit_receipt_sha256"]
             receipt["receipt_sha256"] = _hash_json(receipt)
             receipt_path = receipt_root / f"layer-{layer:03d}.json"
             write_json(receipt_path, receipt)
