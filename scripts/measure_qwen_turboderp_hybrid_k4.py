@@ -23,6 +23,7 @@ import multiprocessing as mp
 from pathlib import Path
 import sys
 import time
+import types
 
 import numpy as np
 
@@ -40,6 +41,42 @@ from run_qwen_fast_kld import _allocate, _load_candidates
 
 
 ATTENTION = ("q_proj", "k_proj", "v_proj", "o_proj")
+
+
+def _import_exllamav3_reader(exllamav3_root: Path):
+    """Import only EXL3's checkpoint reader, without generation dependencies.
+
+    This comparison never executes EXL3 attention. The narrow import avoids
+    requiring FlashAttention/Formatron merely to reconstruct packed weights,
+    while the real pinned EXL3 extension still performs dequantization.
+    """
+    package_root = exllamav3_root / "exllamav3"
+    if not package_root.is_dir():
+        raise ValueError(f"invalid ExLlamaV3 source root: {exllamav3_root}")
+    if "flash_attn" not in sys.modules:
+        flash_stub = types.ModuleType("flash_attn")
+
+        def unavailable(*_args, **_kwargs):
+            raise RuntimeError("FlashAttention is unavailable in checkpoint-reader mode")
+
+        flash_stub.flash_attn_func = unavailable
+        flash_stub.flash_attn_with_kvcache = unavailable
+        flash_stub.flash_attn_varlen_func = unavailable
+        sys.modules["flash_attn"] = flash_stub
+    package = types.ModuleType("exllamav3")
+    package.__file__ = str(package_root / "__init__.py")
+    package.__package__ = "exllamav3"
+    package.__path__ = [str(package_root)]
+    sys.modules["exllamav3"] = package
+    model_package = types.ModuleType("exllamav3.model")
+    model_package.__file__ = str(package_root / "model" / "__init__.py")
+    model_package.__package__ = "exllamav3.model"
+    model_package.__path__ = [str(package_root / "model")]
+    sys.modules["exllamav3.model"] = model_package
+    from exllamav3.model.config import Config
+    from exllamav3.model.model import Model
+
+    return Config, Model
 
 
 def _install_ours(
@@ -98,12 +135,7 @@ def _copy_exl3_linear(source, destination) -> None:
 def _install_turboderp_full(model, turbo_model: Path, exllamav3_root: Path) -> dict:
     import torch
 
-    sys.path.insert(0, str(exllamav3_root))
-    try:
-        from exllamav3 import Config, Model
-    finally:
-        # Imported modules remain in sys.modules; avoid affecting later imports.
-        sys.path.pop(0)
+    Config, Model = _import_exllamav3_reader(exllamav3_root)
 
     config = Config.from_directory(str(turbo_model))
     quant = json.loads((turbo_model / "quantization_config.json").read_text())
@@ -251,6 +283,49 @@ def _score(
     return report
 
 
+def _load_existing_arm(
+    root: Path,
+    arm: str,
+    teacher_paths: list[Path],
+) -> dict | None:
+    """Adopt a fully sealed arm so an interrupted comparison can resume safely."""
+    report_path = root / arm / "kld-report.json"
+    if not report_path.is_file():
+        return None
+    report = json.loads(report_path.read_text())
+    if report.get("schema") != "quant-pipeline.qwen-posttrained-k4-arm.v1":
+        raise ValueError(f"{arm} existing report schema mismatch")
+    if report.get("arm") != arm:
+        raise ValueError(f"{arm} existing report arm mismatch")
+    expected = report.get("report_sha256")
+    unsealed = {key: value for key, value in report.items() if key != "report_sha256"}
+    if expected != _hash_json(unsealed):
+        raise ValueError(f"{arm} existing report seal mismatch")
+    token_path = root / arm / "token-kld.npy"
+    if not token_path.is_file() or report.get("token_kld_sha256") != sha256_file(token_path):
+        raise ValueError(f"{arm} existing token-KLD artifact mismatch")
+    if report.get("teacher_files") != [sha256_file(path) for path in teacher_paths]:
+        raise ValueError(f"{arm} existing teacher lineage mismatch")
+    student_paths = sorted((root / arm / "student-logits").glob("row-*.safetensors"))
+    if len(student_paths) != ROWS:
+        raise ValueError(f"{arm} existing student-logit inventory mismatch")
+    if report.get("student_files") != [sha256_file(path) for path in student_paths]:
+        raise ValueError(f"{arm} existing student-logit hashes mismatch")
+    print(
+        json.dumps(
+            {
+                "stage": "adopt-existing-arm",
+                "arm": arm,
+                "mean_kld": report["summary"]["mean"],
+                "report_sha256": expected,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    return report
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-model", type=Path, required=True)
@@ -265,6 +340,11 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--attention-backend", default="eager")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Adopt hash-verified completed arms from an interrupted execution.",
+    )
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     plan = {
@@ -316,8 +396,18 @@ def main() -> int:
         raise ValueError("source, TurboDerp, and inferred-lineage receipts disagree")
 
     output = args.output.resolve()
-    output.mkdir(parents=True, exist_ok=False)
-    write_json(output / "plan.json", plan | {"dry_run": False})
+    execution_plan = plan | {"dry_run": False}
+    if args.resume:
+        output.mkdir(parents=True, exist_ok=True)
+        existing_plan_path = output / "plan.json"
+        if existing_plan_path.is_file():
+            if json.loads(existing_plan_path.read_text()) != execution_plan:
+                raise ValueError("resume plan disagrees with existing execution plan")
+        else:
+            write_json(existing_plan_path, execution_plan)
+    else:
+        output.mkdir(parents=True, exist_ok=False)
+        write_json(output / "plan.json", execution_plan)
     candidate_receipts = _verify_candidate_inventory(args.encode_root.resolve())
     allocation_receipts, candidate_rows = _load_candidates(args.encode_root.resolve())
     selected_allocation = _allocate(allocation_receipts, candidate_rows)
@@ -350,47 +440,69 @@ def main() -> int:
     for parameter in model.parameters():
         parameter.requires_grad_(False)
 
-    _install_ours(
-        model,
-        args.encode_root.resolve(),
-        selected_choices,
-        "install-ours-selected-k34",
-    )
-    selected = _score(
-        teacher_paths,
-        _capture(model, token_ids, output, "ours-selected-k34"),
-        output,
-        "ours-selected-k34",
-        args.workers,
-    )
-    _install_ours(model, args.encode_root.resolve(), None, "install-ours-k4")
-    ours = _score(
-        teacher_paths,
-        _capture(model, token_ids, output, "ours-expert-k4"),
-        output,
-        "ours-expert-k4",
-        args.workers,
-    )
-    turbo_scope = _install_turboderp_full(
-        model,
-        args.turboderp_model.resolve(),
-        args.exllamav3_root.resolve(),
-    )
-    turbo = _score(
-        teacher_paths,
-        _capture(model, token_ids, output, "turboderp-full-k4"),
-        output,
-        "turboderp-full-k4",
-        args.workers,
-    )
-    _install_ours(model, args.encode_root.resolve(), None, "install-ours-k4")
-    hybrid = _score(
-        teacher_paths,
-        _capture(model, token_ids, output, "hybrid-ours-experts"),
-        output,
-        "hybrid-ours-experts",
-        args.workers,
-    )
+    selected = _load_existing_arm(output, "ours-selected-k34", teacher_paths)
+    if selected is None:
+        _install_ours(
+            model,
+            args.encode_root.resolve(),
+            selected_choices,
+            "install-ours-selected-k34",
+        )
+        selected = _score(
+            teacher_paths,
+            _capture(model, token_ids, output, "ours-selected-k34"),
+            output,
+            "ours-selected-k34",
+            args.workers,
+        )
+    ours = _load_existing_arm(output, "ours-expert-k4", teacher_paths)
+    if ours is None:
+        _install_ours(model, args.encode_root.resolve(), None, "install-ours-k4")
+        ours = _score(
+            teacher_paths,
+            _capture(model, token_ids, output, "ours-expert-k4"),
+            output,
+            "ours-expert-k4",
+            args.workers,
+        )
+    turbo = _load_existing_arm(output, "turboderp-full-k4", teacher_paths)
+    turbo_scope = None
+    if turbo is None:
+        turbo_scope = _install_turboderp_full(
+            model,
+            args.turboderp_model.resolve(),
+            args.exllamav3_root.resolve(),
+        )
+        turbo = _score(
+            teacher_paths,
+            _capture(model, token_ids, output, "turboderp-full-k4"),
+            output,
+            "turboderp-full-k4",
+            args.workers,
+        )
+    hybrid = _load_existing_arm(output, "hybrid-ours-experts", teacher_paths)
+    if hybrid is None:
+        # If TurboDerp was adopted, reconstruct its dense components before
+        # replacing experts. Otherwise the current model already contains it.
+        if turbo_scope is None:
+            turbo_scope = _install_turboderp_full(
+                model,
+                args.turboderp_model.resolve(),
+                args.exllamav3_root.resolve(),
+            )
+        _install_ours(model, args.encode_root.resolve(), None, "install-ours-k4")
+        hybrid = _score(
+            teacher_paths,
+            _capture(model, token_ids, output, "hybrid-ours-experts"),
+            output,
+            "hybrid-ours-experts",
+            args.workers,
+        )
+    if turbo_scope is None:
+        existing_summary = output / "summary.json"
+        if not existing_summary.is_file():
+            raise ValueError("cannot reconstruct TurboDerp scope from completed arms")
+        turbo_scope = json.loads(existing_summary.read_text())["turboderp_scope"]
     del model
     torch.cuda.empty_cache()
 

@@ -11,6 +11,7 @@ CODE_ROOT=${CODE_ROOT:-${RUN_ROOT}/code}
 ARTIFACT_ROOT=${ARTIFACT_ROOT:-/artifacts/shapleymcg/qwen3-30b-a3b-post-v1}
 CAPTURE_ROOT=${CAPTURE_ROOT:-${RUN_ROOT}/calibration-capture-route-complete}
 PYTHON=${PYTHON:-/workspace/quant-venv/bin/python}
+export PATH="$(dirname "${PYTHON}"):${PATH}"
 SOURCE_MODEL=${SOURCE_MODEL:-/models/Qwen3-30B-A3B-post-4c446470}
 SOURCE_REVISION=${SOURCE_REVISION:-4c446470ba0aec43e22ac1128f9ffd915f338ba3}
 TURBODERP_MODEL=${TURBODERP_MODEL:-/models/turboderp-Qwen3-30B-A3B-exl3-K4}
@@ -123,6 +124,7 @@ if ! matched_complete; then
     --output "${ARTIFACT_ROOT}/matched-k4-comparison" \
     --workers 8 \
     --attention-backend eager \
+    --resume \
     --execute
 else
     printf 'adopted successful matched K4 evaluation\n'

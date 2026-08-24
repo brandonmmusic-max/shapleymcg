@@ -92,6 +92,48 @@ def test_hybrid_k4_plan_is_nonmutating_and_names_three_arms(tmp_path):
     assert not output.exists()
 
 
+def test_hybrid_k4_resume_adopts_only_fully_sealed_arm(tmp_path):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    try:
+        namespace = runpy.run_path(
+            str(ROOT / "scripts/measure_qwen_turboderp_hybrid_k4.py")
+        )
+    finally:
+        sys.path.pop(0)
+    teacher = []
+    for row in range(10):
+        path = tmp_path / f"teacher-{row:02d}.bin"
+        path.write_bytes(f"teacher-{row}".encode())
+        teacher.append(path)
+    arm = "ours-selected-k34"
+    arm_root = tmp_path / arm
+    students = arm_root / "student-logits"
+    students.mkdir(parents=True)
+    student_paths = []
+    for row in range(10):
+        path = students / f"row-{row:02d}.safetensors"
+        path.write_bytes(f"student-{row}".encode())
+        student_paths.append(path)
+    token = arm_root / "token-kld.npy"
+    token.write_bytes(b"sealed-token-kld")
+    report = {
+        "schema": "quant-pipeline.qwen-posttrained-k4-arm.v1",
+        "arm": arm,
+        "summary": {"mean": 0.041},
+        "top1_agreement": 0.92,
+        "token_kld_sha256": namespace["sha256_file"](token),
+        "teacher_files": [namespace["sha256_file"](path) for path in teacher],
+        "student_files": [namespace["sha256_file"](path) for path in student_paths],
+    }
+    report["report_sha256"] = namespace["_hash_json"](report)
+    (arm_root / "kld-report.json").write_text(json.dumps(report))
+    adopted = namespace["_load_existing_arm"](tmp_path, arm, teacher)
+    assert adopted["report_sha256"] == report["report_sha256"]
+    token.write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="token-KLD artifact mismatch"):
+        namespace["_load_existing_arm"](tmp_path, arm, teacher)
+
+
 def test_fit_route_coverage_extension_defaults_to_dry_run(tmp_path):
     output = tmp_path / "extended.json"
     result = run(
