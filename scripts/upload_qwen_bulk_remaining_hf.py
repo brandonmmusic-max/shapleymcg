@@ -165,6 +165,13 @@ def main() -> int:
     parser.add_argument("--run-root", type=Path, default=Path("/qwen-shapleymcg-run"))
     parser.add_argument("--token-file", type=Path, required=True)
     parser.add_argument("--kind", choices=("fit", "candidate"), required=True)
+    parser.add_argument("--first-layer", type=int, default=0)
+    parser.add_argument(
+        "--layers",
+        type=int,
+        default=48,
+        help="number of consecutive layers beginning at --first-layer",
+    )
     parser.add_argument("--kld-exit", type=Path)
     parser.add_argument("--delete-verified", action="store_true")
     parser.add_argument(
@@ -184,6 +191,8 @@ def main() -> int:
         parser.error("--retry-minutes must be nonnegative")
     if args.batch_layers < 1:
         parser.error("--batch-layers must be positive")
+    if args.first_layer < 0 or args.layers < 1 or args.first_layer + args.layers > 48:
+        parser.error("requested layer interval must be within [0, 48)")
     if args.kind == "candidate" and args.delete_verified and not _kld_succeeded(args.kld_exit):
         raise ValueError("refusing candidate deletion before successful KLD")
 
@@ -203,7 +212,12 @@ def main() -> int:
     receipt_root = run_root / "artifacts" / "hf-upload" / plural
     receipt_root.mkdir(parents=True, exist_ok=True)
     layer_roots = sorted(
-        path for path in data_root.glob("layer-[0-9][0-9][0-9]") if path.is_dir()
+        path
+        for path in data_root.glob("layer-[0-9][0-9][0-9]")
+        if path.is_dir()
+        and args.first_layer
+        <= int(path.name.removeprefix("layer-"))
+        < args.first_layer + args.layers
     )
     if not args.include_receipted:
         layer_roots = [
