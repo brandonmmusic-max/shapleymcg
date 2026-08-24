@@ -42,6 +42,18 @@ candidate is still emitted by the pinned MCG runtime); otherwise it remains a
 diagnostic oracle and is barred from allocation. This prevents a statistically
 attractive but undeployable mixed checkpoint.
 
+Runtime-format compatibility is necessary but not sufficient. MCG transforms
+also create layer-shared payloads: gate/up and down candidates must agree on the
+sealed shared-transform domain. Every proposal therefore carries a coupling
+group, a shared-domain hash, and the exact fixed bytes for that domain.
+`quant_pipeline.candidates.factory_allocation` builds the exact internal Pareto
+frontier for each `(layer, shared domain)`, charging shared bytes once, then
+runs the global exact-byte DP across layers. The allocator may combine native
+and optional factory proposals within a layer only when they attest the same
+shared-domain hash. Otherwise it chooses one complete factory/transform domain
+for that layer. A flat per-matrix knapsack is explicitly unsafe when more than
+one domain exists.
+
 ## Whole-layer factory-union experiment
 
 `scripts/measure_qwen_candidate_factory_union.py` freezes all of the following:
@@ -84,7 +96,7 @@ whole-layer factory union. It does not silently replace the original control.
 
 ## Matrix-level candidate ledger
 
-The next competitive ledger should key each candidate by
+The competitive ledger keys each candidate by
 `(layer, expert, projection, bits, factory, reconstruction_sha256)` and retain
 the exact packed-byte cost. For candidates at the same bit rate:
 
@@ -96,9 +108,11 @@ the exact packed-byte cost. For candidates at the same bit rate:
    that factor on the same held-out rows.
 4. Preserve raw proxy, calibrated proxy, uncertainty, factory identity, packed
    bytes, and reconstruction hash as separate ledger fields.
-5. Let the global allocator choose both rate and factory under the exact byte
-   budget. Candidates with equal rate and higher calibrated damage are
-   dominated; different-rate candidates remain on the Pareto frontier.
+5. Build per-layer, per-shared-domain frontiers, then let the coupled global
+   allocator choose both rate and factory under the exact byte budget.
+   Candidates with equal rate and higher calibrated damage are dominated;
+   different-rate candidates remain on the Pareto frontier. Shared payload
+   costs are charged once per selected layer domain.
 6. Reconstruct the chosen mixture and adjudicate it with sealed end-to-end KLD.
 
 The direct whole-layer experiment is stronger evidence for those 48 aggregate

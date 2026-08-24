@@ -46,6 +46,10 @@ from .factory_calibration import (
     apply_factory_delta_calibration,
     fit_factory_delta_calibration,
 )
+from .factory_allocation import (
+    CoupledFactoryAllocation,
+    allocate_factory_union,
+)
 
 __all__ = [
     "BackendAttestation",
@@ -88,4 +92,6 @@ __all__ = [
     "FactoryDeltaAnchor",
     "apply_factory_delta_calibration",
     "fit_factory_delta_calibration",
+    "CoupledFactoryAllocation",
+    "allocate_factory_union",
 ]

@@ -70,9 +70,15 @@ ledger are documented in
 model-agnostic `quant_pipeline.candidates.factory_union` boundary makes native
 MCG coverage mandatory, admits upstream/ModelOpt-style proposals additively,
 common-scores every reconstruction, and hands `(factory, rate)` alternatives
-to the existing exact-byte allocator. A new model therefore never depends on
-prepublished upstream candidates. No result claim is made until the untouched
-validation endpoint is sealed.
+to the exact-byte allocator. The compatibility-safe
+`quant_pipeline.candidates.factory_allocation` path first constructs a Pareto
+frontier inside each layer/shared-transform domain, charges each shared payload
+once, and then selects one complete domain/profile per layer globally. This
+allows matrix-level factory mixing only when the sealed shared-transform
+identity matches and prevents an undeployable mixture of incompatible MCG
+rotations. A new model therefore never depends on prepublished upstream
+candidates. No result claim is made until the untouched validation endpoint is
+sealed.
 
 ## Base-model causal allocation result
 

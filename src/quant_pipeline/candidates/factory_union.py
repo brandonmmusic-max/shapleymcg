@@ -19,10 +19,10 @@ from ..core.artifacts import canonical_json, sha256_bytes
 
 
 SCHEMA_FACTORY_IDENTITY = "quant-pipeline.candidate-factory-identity.v1"
-SCHEMA_FACTORY_UNIT = "quant-pipeline.candidate-factory-unit.v1"
-SCHEMA_FACTORY_PROPOSAL = "quant-pipeline.candidate-factory-proposal.v1"
+SCHEMA_FACTORY_UNIT = "quant-pipeline.candidate-factory-unit.v2"
+SCHEMA_FACTORY_PROPOSAL = "quant-pipeline.candidate-factory-proposal.v2"
 SCHEMA_COMMON_SCORE = "quant-pipeline.candidate-factory-common-score.v1"
-SCHEMA_FACTORY_UNION = "quant-pipeline.candidate-factory-union-ledger.v1"
+SCHEMA_FACTORY_UNION = "quant-pipeline.candidate-factory-union-ledger.v2"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
@@ -77,6 +77,7 @@ class CandidateUnit:
     """One independently allocatable weight unit, dense or routed."""
 
     unit_id: str
+    coupling_group_id: str
     source_sha256: str
     source_shape: tuple[int, ...]
     requested_rates: tuple[int, ...]
@@ -84,8 +85,8 @@ class CandidateUnit:
     metadata: Mapping[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
-        if not self.unit_id:
-            raise ValueError("candidate unit_id must be non-empty")
+        if not self.unit_id or not self.coupling_group_id:
+            raise ValueError("candidate unit_id and coupling_group_id must be non-empty")
         if not self.source_shape or any(
             isinstance(value, bool) or not isinstance(value, int) or value <= 0
             for value in self.source_shape
@@ -101,6 +102,7 @@ class CandidateUnit:
         body = {
             "schema": SCHEMA_FACTORY_UNIT,
             "unit_id": self.unit_id,
+            "coupling_group_id": self.coupling_group_id,
             "source_sha256": _hash(self.source_sha256, "source identity"),
             "source_shape": list(self.source_shape),
             "requested_rates": sorted(self.requested_rates),
@@ -124,6 +126,8 @@ class FactoryProposal:
     exact_stored_bytes: int
     payload_ref: str
     reconstruction_ref: str
+    compatibility_domain_sha256: str
+    fixed_shared_bytes: int
     metadata: Mapping[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
@@ -139,6 +143,12 @@ class FactoryProposal:
             raise ValueError("proposal exact byte cost must be positive")
         if not self.payload_ref or not self.reconstruction_ref:
             raise ValueError("proposal payload references must be non-empty")
+        if (
+            isinstance(self.fixed_shared_bytes, bool)
+            or not isinstance(self.fixed_shared_bytes, int)
+            or self.fixed_shared_bytes < 0
+        ):
+            raise ValueError("proposal fixed shared byte cost must be nonnegative")
         body = {
             "schema": SCHEMA_FACTORY_PROPOSAL,
             "unit_id": self.unit_id,
@@ -154,6 +164,11 @@ class FactoryProposal:
             "exact_stored_bytes": self.exact_stored_bytes,
             "payload_ref": self.payload_ref,
             "reconstruction_ref": self.reconstruction_ref,
+            "compatibility_domain_sha256": _hash(
+                self.compatibility_domain_sha256,
+                "proposal compatibility domain",
+            ),
+            "fixed_shared_bytes": self.fixed_shared_bytes,
             # Factory-local losses are provenance only.  The allocator never
             # reads metadata when choosing a candidate.
             "metadata": dict(self.metadata),
@@ -304,6 +319,9 @@ def build_factory_union(
                         metadata={
                             "factory_name": proposal.factory_name,
                             "rate": proposal.rate,
+                            "coupling_group_id": unit.coupling_group_id,
+                            "compatibility_domain_sha256": proposal.compatibility_domain_sha256,
+                            "fixed_shared_bytes": proposal.fixed_shared_bytes,
                             "proposal_sha256": proposal_row["proposal_sha256"],
                             "common_score_sha256": score["score_sha256"],
                             "record_sha256": record["record_sha256"],
@@ -332,6 +350,15 @@ def build_factory_union(
         )
     )
     handoff.sort(key=lambda row: (row.unit_id, row.stored_bytes, row.choice_id))
+    domains_by_group: dict[str, set[str]] = {}
+    for candidate in handoff:
+        metadata = candidate.metadata or {}
+        domains_by_group.setdefault(
+            str(metadata["coupling_group_id"]), set()
+        ).add(str(metadata["compatibility_domain_sha256"]))
+    coupled_allocation_required = any(
+        len(domains) > 1 for domains in domains_by_group.values()
+    )
     ledger = {
         "schema": SCHEMA_FACTORY_UNION,
         "required_factory_names": required,
@@ -348,6 +375,11 @@ def build_factory_union(
         "records": records,
         "selection_authority": "common ShapleyMCG scorer plus exact-byte allocator",
         "factory_metadata_is_nonobjective": True,
+        "allocation_contract": "one complete shared-transform domain per coupling group",
+        "coupled_allocation_required": coupled_allocation_required,
+        "compatibility_domains_by_group": {
+            group: sorted(domains) for group, domains in sorted(domains_by_group.items())
+        },
     }
     ledger["ledger_sha256"] = _hash_json(ledger)
     return FactoryUnion(ledger=ledger, allocator_candidates=tuple(handoff))
