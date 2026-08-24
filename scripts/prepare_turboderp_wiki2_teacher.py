@@ -54,12 +54,18 @@ def main() -> int:
         token_ids,
         output / "teacher-logits",
         "posttrained-bf16-reference",
+        metadata={
+            "attention_backend": args.attention_backend,
+            "model_revision": args.model_revision,
+            "panel_sha256": panel["panel_sha256"],
+        },
     )
     del teacher
     torch.cuda.empty_cache()
     receipt = {
         "schema": "quant-pipeline.turboderp-wiki2-teacher.v1",
         "model_revision": args.model_revision,
+        "attention_backend": args.attention_backend,
         "source_receipt_sha256": source_seal,
         "source_receipt_file_sha256": sha256_file(args.source_receipt),
         "panel_sha256": panel["panel_sha256"],

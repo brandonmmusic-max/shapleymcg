@@ -80,7 +80,13 @@ def _load_model(path: Path, attention_backend: str):
     return model
 
 
-def _capture(model, token_ids: np.ndarray, root: Path, role: str) -> list[Path]:
+def _capture(
+    model,
+    token_ids: np.ndarray,
+    root: Path,
+    role: str,
+    metadata: dict[str, str] | None = None,
+) -> list[Path]:
     import torch
     from safetensors.torch import save_file
 
@@ -97,7 +103,12 @@ def _capture(model, token_ids: np.ndarray, root: Path, role: str) -> list[Path]:
         save_file(
             {"logits": logits},
             path,
-            metadata={"role": role, "row": str(index), "positions": str(len(values))},
+            metadata={
+                "role": role,
+                "row": str(index),
+                "positions": str(len(values)),
+                **(metadata or {}),
+            },
         )
         paths.append(path)
         print(

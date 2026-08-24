@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 
@@ -81,3 +85,43 @@ def test_causal_measurement_kld_is_zero_for_identical_logits():
     logits = rng.standard_normal((9, 23), dtype=np.float32)
     values = module._token_kld(logits, logits.copy(), chunk=3)
     assert np.max(np.abs(values)) < 1e-14
+
+
+def test_panel_allocation_plan_binds_teacher_receipt_and_defaults_to_sdpa(tmp_path):
+    allocation = tmp_path / "allocation.json"
+    inventory = tmp_path / "inventory.json"
+    teacher_receipt = tmp_path / "teacher-receipt.json"
+    for path in (allocation, inventory, teacher_receipt):
+        path.write_text("{}\n")
+    output = tmp_path / "output"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/measure_qwen_mcg_panel_allocation.py"),
+            "--source-model",
+            str(tmp_path / "model"),
+            "--allocation",
+            str(allocation),
+            "--candidate-inventory",
+            str(inventory),
+            "--candidate-cache",
+            str(tmp_path / "cache"),
+            "--panel-root",
+            str(tmp_path / "panel"),
+            "--teacher-root",
+            str(tmp_path / "teacher"),
+            "--teacher-receipt",
+            str(teacher_receipt),
+            "--output",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+        env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
+        text=True,
+    )
+    plan = json.loads(result.stdout)
+    assert plan["dry_run"] is True
+    assert plan["attention_backend"] == "sdpa"
+    assert plan["teacher_receipt_file_sha256"]
+    assert not output.exists()
