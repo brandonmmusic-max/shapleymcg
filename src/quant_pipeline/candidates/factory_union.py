@@ -48,17 +48,23 @@ class FactoryIdentity:
     name: str
     version: str
     implementation_sha256: str
+    encoding_family: str
+    runtime_format_sha256: str
     provenance: Mapping[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
-        if not self.name or not self.version:
-            raise ValueError("factory name and version must be non-empty")
+        if not self.name or not self.version or not self.encoding_family:
+            raise ValueError("factory name, version, and encoding family must be non-empty")
         body = {
             "schema": SCHEMA_FACTORY_IDENTITY,
             "name": self.name,
             "version": self.version,
             "implementation_sha256": _hash(
                 self.implementation_sha256, "factory implementation identity"
+            ),
+            "encoding_family": self.encoding_family,
+            "runtime_format_sha256": _hash(
+                self.runtime_format_sha256, "factory runtime format identity"
             ),
             "provenance": dict(self.provenance),
         }
@@ -233,6 +239,20 @@ def build_factory_union(
     required = sorted(set(required_factory_names))
     if not required or any(name not in by_name for name in required):
         raise ValueError("every required factory must be registered")
+    required_formats = {by_name[name]["runtime_format_sha256"] for name in required}
+    if len(required_formats) != 1:
+        raise ValueError("required factories disagree on runtime payload format")
+    runtime_format = next(iter(required_formats))
+    incompatible = [
+        row["name"]
+        for row in identities
+        if row["runtime_format_sha256"] != runtime_format
+    ]
+    if incompatible:
+        raise ValueError(
+            "candidate factories are not directly co-emittable in the required runtime format: "
+            + ", ".join(sorted(incompatible))
+        )
 
     records: list[dict[str, Any]] = []
     handoff: list[Candidate] = []
@@ -315,6 +335,7 @@ def build_factory_union(
     ledger = {
         "schema": SCHEMA_FACTORY_UNION,
         "required_factory_names": required,
+        "runtime_format_sha256": runtime_format,
         "factory_identities": sorted(identities, key=lambda row: row["name"]),
         "units": sorted(unit_rows, key=lambda row: row["unit_id"]),
         "coverage": {

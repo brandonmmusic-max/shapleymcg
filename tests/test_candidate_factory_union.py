@@ -15,9 +15,9 @@ from quant_pipeline.candidates.factory_union import (
 
 
 HASHES = {
-    name: (str(index) * 64)
+    name: (format(index, "x") * 64)
     for index, name in enumerate(
-        ("source", "calibration", "native-code", "upstream-code", "packed", "reconstruction", "instrument", "fit"),
+        ("source", "calibration", "native-code", "upstream-code", "packed", "reconstruction", "instrument", "fit", "runtime", "other-runtime"),
         start=1,
     )
 }
@@ -67,7 +67,14 @@ class Scorer:
 
 
 def identity(name, implementation):
-    return FactoryIdentity(name, "1", implementation, {"test": True})
+    return FactoryIdentity(
+        name,
+        "1",
+        implementation,
+        "exl3-mcg",
+        HASHES["runtime"],
+        {"test": True},
+    )
 
 
 def unit(name="unit-0"):
@@ -153,4 +160,27 @@ def test_factory_identity_and_proposal_identity_must_match():
     with pytest.raises(ValueError, match="identity differs"):
         build_factory_union(
             [unit()], [native], scorer, required_factory_names=["native-mcg"]
+        )
+
+
+def test_incompatible_runtime_payload_factory_cannot_enter_allocation_union():
+    native = Factory(identity("native-mcg", HASHES["native-code"]), {("unit-0", 3): 9, ("unit-0", 4): 4})
+    foreign_identity = FactoryIdentity(
+        "foreign",
+        "1",
+        HASHES["upstream-code"],
+        "foreign-codec",
+        HASHES["other-runtime"],
+        {"test": True},
+    )
+    foreign = Factory(foreign_identity, {("unit-0", 3): 2, ("unit-0", 4): 1})
+    scorer = Scorer({
+        ("native-mcg", "unit-0", 3): 0.9,
+        ("native-mcg", "unit-0", 4): 0.4,
+        ("foreign", "unit-0", 3): 0.2,
+        ("foreign", "unit-0", 4): 0.1,
+    })
+    with pytest.raises(ValueError, match="not directly co-emittable"):
+        build_factory_union(
+            [unit()], [native, foreign], scorer, required_factory_names=["native-mcg"]
         )

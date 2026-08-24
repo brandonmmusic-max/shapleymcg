@@ -34,6 +34,14 @@ must cover every unit/rate pair, so a new model remains fully quantizable when
 no upstream checkpoint or model-specific factory exists. Optional factories
 are additive arrows in the candidate-selection quiver, not dependencies.
 
+Every registered factory must also attest the same runtime payload-format hash
+as the required native factory. An upstream MCG implementation can therefore
+contribute directly. A ModelOpt or other foreign-format proposal must first be
+materialized through a `modelopt-guided-mcg` adapter (so the resulting packed
+candidate is still emitted by the pinned MCG runtime); otherwise it remains a
+diagnostic oracle and is barred from allocation. This prevents a statistically
+attractive but undeployable mixed checkpoint.
+
 ## Whole-layer factory-union experiment
 
 `scripts/measure_qwen_candidate_factory_union.py` freezes all of the following:
