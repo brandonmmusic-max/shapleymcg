@@ -1,0 +1,25 @@
+{
+  "controls": [
+    {"allocation_sha256": "5f56bd58fe9683f1faf9a8b3682d31418cb071373287bbb10bd4466e7cb9008a", "mean_kld": 0.061175293046327205, "report_sha256": "15e5311489297233e530be96d37efbd70bc04c4d31e65a66e7355588e50a982e", "seed": 0, "top1_agreement": 0.897265625},
+    {"allocation_sha256": "d956f1519a922b42973f6ca4f0e596534f9e7275477cbe143a879294980326c8", "mean_kld": 0.08057943718460085, "report_sha256": "a15b156a5c21b9ad652c0b68680a614891f553a24cfc83f794d122f0b769e631", "seed": 1, "top1_agreement": 0.885400390625},
+    {"allocation_sha256": "44f9f18a5ef17b2d69bd1c99039c4900f7f5a3fdc848eb809c6100938fb0bbeb", "mean_kld": 0.0757252278005803, "report_sha256": "f760739ef78381aa54ca4053e3a16d40f337e0db78823a667b0efe5fae4be92b", "seed": 2, "top1_agreement": 0.888671875},
+    {"allocation_sha256": "2687a8db2642d94eee15445ca7fddeee366e760a90be82a3b28915b742ccb646", "mean_kld": 0.07643412245508205, "report_sha256": "72a1dc31683b885602d6339d9de55d153d23e54a63a3f90a66079229c2505da0", "seed": 3, "top1_agreement": 0.88603515625},
+    {"allocation_sha256": "fb15876dea0c45e8d28e1d6041ae75fa5fd5e93aeae1c27991988373bc7d0bd7", "mean_kld": 0.05595689276383418, "report_sha256": "07d0ed4a5bc71bf6eceb74700c3d62de75bf08d1b7e9c26f5b6b781d91142b90", "seed": 4, "top1_agreement": 0.90078125}
+  ],
+  "naive_max_kld": 0.08057943718460085,
+  "naive_mean_kld": 0.06997419465008492,
+  "naive_mean_top1_agreement": 0.891630859375,
+  "naive_min_kld": 0.05595689276383418,
+  "naive_sample_std_kld": 0.010737570027276615,
+  "naive_sample_std_top1_agreement": 0.006970768520725044,
+  "naive_seeds_beating_selected_kld": 0,
+  "panel_sha256": "6c509f3496d5a1fe6739c58ffa152c3d4202932f9d8a6514e55d17f8a4cfa741",
+  "record_sha256": "e2d9cbf5fcda7254a7a574a450d66fbd850b8e32adc9f2fcf9a5fb747bdb33df",
+  "schema": "quant-pipeline.qwen-score-blind-3p5-controls-github-summary.v1",
+  "seeds": [0, 1, 2, 3, 4],
+  "selected_kld_reduction_vs_naive_mean": 0.2846531752629107,
+  "selected_mean_kld": 0.05005581795647327,
+  "selected_top1_agreement": 0.908447265625,
+  "selected_top1_gain_vs_naive_mean": 0.016816406250000027,
+  "upstream_summary_sha256": "ea1b34dac4ee1102016021f46e4208d0745f468440f6ac278ca5ade3719355af"
+}

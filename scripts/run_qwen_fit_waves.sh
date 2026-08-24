@@ -10,6 +10,7 @@ OUTPUT_ROOT=${OUTPUT_ROOT:-${RUN_ROOT}/streaming-fit}
 LOG_ROOT=${LOG_ROOT:-${RUN_ROOT}/logs}
 LAYERS=${LAYERS:-48}
 WAVE_SIZE=${WAVE_SIZE:-8}
+MODEL_REVISION=${MODEL_REVISION:-1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9}
 
 export PYTHONPATH="${CODE_ROOT}/src:${RUN_ROOT}/encoding-site${PYTHONPATH:+:${PYTHONPATH}}"
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1}
@@ -46,6 +47,7 @@ launch() {
             --output-dir "${OUTPUT_ROOT}/layer-${label}" \
             --source-receipt "${SOURCE_RECEIPT}" \
             --layer "${layer}" \
+            --model-revision "${MODEL_REVISION}" \
             --device "cuda:${device}" \
             --execute > "${log}" 2>&1
         code=$?

@@ -131,6 +131,7 @@ def _token_kld_chunked(teacher: np.ndarray, student: np.ndarray, chunk: int = 16
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument("--model-revision", default=MODEL_REVISION)
     parser.add_argument("--encode-root", type=Path, required=True)
     parser.add_argument("--kld-window", type=Path, required=True)
     parser.add_argument("--teacher", type=Path, required=True)
@@ -143,7 +144,7 @@ def main() -> int:
     plan = {
         "schema": "quant-pipeline.qwen-fast-k34-kld-plan.v1",
         "model": str(args.model.resolve()),
-        "model_revision": MODEL_REVISION,
+        "model_revision": args.model_revision,
         "encode_root": str(args.encode_root.resolve()),
         "kld_window": str(args.kld_window.resolve()),
         "teacher": str(args.teacher.resolve()),

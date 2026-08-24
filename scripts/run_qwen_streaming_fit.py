@@ -26,7 +26,7 @@ MODEL_REVISION = "1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9"
 DATASET_REVISION = "b08601e04326c79dfdd32d625aee71d232d685c3"
 
 
-def _source_identity(path: Path) -> str:
+def _source_identity(path: Path, expected_revision: str) -> str:
     receipt = json.loads(path.read_text())
     expected = receipt.get("receipt_sha256")
     body = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
@@ -35,7 +35,7 @@ def _source_identity(path: Path) -> str:
     )
     if expected != actual:
         raise ValueError("source-checkpoint receipt seal mismatch")
-    if receipt.get("revision") != MODEL_REVISION:
+    if receipt.get("revision") != expected_revision:
         raise ValueError("source-checkpoint receipt revision mismatch")
     return str(expected)
 
@@ -77,13 +77,13 @@ def main() -> int:
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
-    if args.model_revision != MODEL_REVISION or args.dataset_revision != DATASET_REVISION:
-        parser.error("model and dataset revisions must match the pinned experiment")
+    if not args.model_revision or args.dataset_revision != DATASET_REVISION:
+        parser.error("a model revision and the pinned dataset revision are required")
     if args.layer not in range(48):
         parser.error("--layer must be in [0, 47]")
     capture_root = args.capture_root.resolve()
     output = args.output_dir.resolve()
-    source_identity = _source_identity(args.source_receipt.resolve())
+    source_identity = _source_identity(args.source_receipt.resolve(), args.model_revision)
     service = _capture_stage(capture_root)
     if args.layer not in service["layers"]:
         parser.error("requested layer is absent from the sealed capture")

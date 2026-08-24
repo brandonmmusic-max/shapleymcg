@@ -10,6 +10,7 @@ LAYERS=${LAYERS:-48}
 START_LAYER=${START_LAYER:-0}
 WAVE_SIZE=${WAVE_SIZE:-4}
 MODEL=${MODEL:-/models/Qwen3-30B-A3B-Base}
+SOURCE_RECEIPT=${SOURCE_RECEIPT:-${RUN_ROOT}/artifacts/qwen-source-receipt.json}
 SOURCE_ROOT=${SOURCE_ROOT:-${RUN_ROOT}/sources/corrected-r10-source/reproducibility/r10}
 NUMERIC_CORE=${NUMERIC_CORE:-${SOURCE_ROOT}/lineage/encode_tr3_v31.py}
 EXTENSION=${EXTENSION:-${RUN_ROOT}/encoding-site/exllamav3_ext.cpython-311-x86_64-linux-gnu.so}
@@ -39,6 +40,7 @@ launch() {
         set +e
         "${PYTHON}" "${CODE_ROOT}/scripts/run_qwen_fast_encode.py" \
             --model "${MODEL}" \
+            --source-receipt "${SOURCE_RECEIPT}" \
             --fit-root "${RUN_ROOT}/streaming-fit" \
             --layer "${layer}" \
             --output "${OUTPUT_ROOT}/layer-${label}" \

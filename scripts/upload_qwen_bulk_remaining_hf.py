@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Batch-publish remaining Qwen fit or candidate layers in two commits.
+"""Batch-publish remaining Qwen fit or candidate layers in bounded commits.
 
 The incremental publishers intentionally make one data commit and one receipt
 commit per layer.  This recovery publisher preserves the same manifests and
-receipts while batching all still-local layers, avoiding Hub repository commit
-rate limits without weakening remote hash verification or deletion gates.
+receipts while batching still-local layers, avoiding Hub repository commit
+rate and operation-count limits without weakening verification or deletion gates.
 """
 
 from __future__ import annotations
@@ -68,12 +68,21 @@ def _commit_with_rate_retry(
                 commit_message=message,
             )
         except HfHubHTTPError as error:
-            if error.response is None or error.response.status_code != 429 or time.monotonic() >= deadline:
+            status = error.response.status_code if error.response is not None else None
+            if status not in {429, 500, 502, 503, 504} or time.monotonic() >= deadline:
                 raise
-            delay = min(300.0, max(1.0, deadline - time.monotonic()))
+            delay = min(
+                300.0 if status == 429 else 60.0,
+                max(1.0, deadline - time.monotonic()),
+            )
             print(
                 json.dumps(
-                    {"stage": "rate-limit", "attempt": attempt, "retry_seconds": delay},
+                    {
+                        "stage": "commit-retry",
+                        "status": status,
+                        "attempt": attempt,
+                        "retry_seconds": delay,
+                    },
                     sort_keys=True,
                 ),
                 flush=True,
@@ -107,6 +116,23 @@ def _verify_file(item, path: Path, expected_bytes: int, expected_sha256: str) ->
         raise ValueError(f"Hub Git-blob hash mismatch for {item.path}")
 
 
+def _batch_is_remote(remote: dict, plural: str, batch: list[dict]) -> bool:
+    try:
+        for layer_row in batch:
+            root = layer_row["root"]
+            for row in layer_row["upload_rows"]:
+                name = f"{plural}/{root.name}/{row['path']}"
+                _verify_file(
+                    remote.get(name),
+                    root / row["path"],
+                    int(row["bytes"]),
+                    row["sha256"],
+                )
+    except (ValueError, FileNotFoundError):
+        return False
+    return True
+
+
 def _kld_succeeded(path: Path | None) -> bool:
     return path is not None and path.is_file() and path.read_text().strip() == "0"
 
@@ -125,9 +151,17 @@ def main() -> int:
         help="re-upload layers that already have a locally verified Hub receipt",
     )
     parser.add_argument("--retry-minutes", type=float, default=75.0)
+    parser.add_argument(
+        "--batch-layers",
+        type=int,
+        default=4,
+        help="maximum layers per data commit; bounds Hub commit-operation count",
+    )
     args = parser.parse_args()
     if args.retry_minutes < 0:
         parser.error("--retry-minutes must be nonnegative")
+    if args.batch_layers < 1:
+        parser.error("--batch-layers must be positive")
     if args.kind == "candidate" and args.delete_verified and not _kld_succeeded(args.kld_exit):
         raise ValueError("refusing candidate deletion before successful KLD")
 
@@ -157,7 +191,6 @@ def main() -> int:
         raise ValueError(f"no local {args.kind} layers remain")
 
     layers: list[dict] = []
-    operations: list[CommitOperationAdd] = []
     for root in layer_roots:
         layer = int(root.name.removeprefix("layer-"))
         encode_receipt = run_root / "fast-encode" / root.name / "encode-receipt.json"
@@ -183,8 +216,9 @@ def main() -> int:
                 "sha256": sha256_file(manifest_path),
             }
         ]
+        upload_operations = []
         for row in upload_rows:
-            operations.append(
+            upload_operations.append(
                 CommitOperationAdd(
                     path_in_repo=f"{plural}/{root.name}/{row['path']}",
                     path_or_fileobj=str(root / row["path"]),
@@ -196,6 +230,7 @@ def main() -> int:
                 "root": root,
                 "manifest": manifest,
                 "upload_rows": upload_rows,
+                "upload_operations": upload_operations,
             }
         )
         print(
@@ -206,47 +241,93 @@ def main() -> int:
             flush=True,
         )
 
-    commit = _commit_with_rate_retry(
-        api,
-        repo_id=args.repo_id,
-        operations=operations,
-        message=f"Batch-publish remaining Qwen {plural}",
-        retry_minutes=args.retry_minutes,
-    )
-    revision = str(commit.oid)
-    remote = _remote_files(api, args.repo_id, revision, plural)
-    for layer_row in layers:
-        root = layer_row["root"]
-        for row in layer_row["upload_rows"]:
-            name = f"{plural}/{root.name}/{row['path']}"
-            _verify_file(remote.get(name), root / row["path"], int(row["bytes"]), row["sha256"])
-
     changed_receipts = []
-    for layer_row in layers:
-        layer = int(layer_row["layer"])
-        manifest = layer_row["manifest"]
-        receipt = {
-            "schema": f"quant-pipeline.qwen-{args.kind}-hf-upload-receipt.v1",
-            "repo_id": args.repo_id,
-            "repo_type": "dataset",
-            "revision": revision,
-            "path_in_repo": f"{plural}/layer-{layer:03d}",
-            "layer": layer,
-            "manifest_sha256": manifest["manifest_sha256"],
-            "file_count": manifest["file_count"],
-            "total_bytes": manifest["total_bytes"],
-            "remote_verification": "size-all; sha256-lfs; git-blob-sha1-non-lfs",
-            "local_deleted": bool(args.delete_verified),
-        }
-        if args.kind == "candidate":
-            receipt["encode_receipt_sha256"] = manifest["encode_receipt_sha256"]
-            receipt["kld_exit_sha256"] = (
-                sha256_file(args.kld_exit) if args.delete_verified and args.kld_exit else None
+    data_revisions = []
+    operation_count = 0
+    existing_revision = str(api.dataset_info(args.repo_id).sha)
+    existing_remote = _remote_files(api, args.repo_id, existing_revision, plural)
+    for start in range(0, len(layers), args.batch_layers):
+        batch = layers[start : start + args.batch_layers]
+        operations = [
+            operation
+            for layer_row in batch
+            for operation in layer_row["upload_operations"]
+        ]
+        operation_count += len(operations)
+        already_remote = _batch_is_remote(existing_remote, plural, batch)
+        if already_remote:
+            revision = existing_revision
+            remote = existing_remote
+        else:
+            commit = _commit_with_rate_retry(
+                api,
+                repo_id=args.repo_id,
+                operations=operations,
+                message=(
+                    f"Batch-publish Qwen {plural} layers "
+                    f"{batch[0]['layer']:03d}-{batch[-1]['layer']:03d}"
+                ),
+                retry_minutes=args.retry_minutes,
             )
-        receipt["receipt_sha256"] = _hash_json(receipt)
-        receipt_path = receipt_root / f"layer-{layer:03d}.json"
-        write_json(receipt_path, receipt)
-        changed_receipts.append(receipt_path)
+            revision = str(commit.oid)
+            remote = _remote_files(api, args.repo_id, revision, plural)
+        data_revisions.append(
+            {
+                "layers": [row["layer"] for row in batch],
+                "revision": revision,
+                "operations": len(operations),
+            }
+        )
+        for layer_row in batch:
+            root = layer_row["root"]
+            for row in layer_row["upload_rows"]:
+                name = f"{plural}/{root.name}/{row['path']}"
+                _verify_file(
+                    remote.get(name),
+                    root / row["path"],
+                    int(row["bytes"]),
+                    row["sha256"],
+                )
+            layer = int(layer_row["layer"])
+            manifest = layer_row["manifest"]
+            receipt = {
+                "schema": f"quant-pipeline.qwen-{args.kind}-hf-upload-receipt.v1",
+                "repo_id": args.repo_id,
+                "repo_type": "dataset",
+                "revision": revision,
+                "path_in_repo": f"{plural}/layer-{layer:03d}",
+                "layer": layer,
+                "manifest_sha256": manifest["manifest_sha256"],
+                "file_count": manifest["file_count"],
+                "total_bytes": manifest["total_bytes"],
+                "remote_verification": "size-all; sha256-lfs; git-blob-sha1-non-lfs",
+                "local_deleted": bool(args.delete_verified),
+            }
+            if args.kind == "candidate":
+                receipt["encode_receipt_sha256"] = manifest["encode_receipt_sha256"]
+                receipt["kld_exit_sha256"] = (
+                    sha256_file(args.kld_exit)
+                    if args.delete_verified and args.kld_exit
+                    else None
+                )
+            receipt["receipt_sha256"] = _hash_json(receipt)
+            receipt_path = receipt_root / f"layer-{layer:03d}.json"
+            write_json(receipt_path, receipt)
+            changed_receipts.append(receipt_path)
+        print(
+            json.dumps(
+                {
+                    "stage": "data-batch-verified",
+                    "kind": args.kind,
+                    "layers": [row["layer"] for row in batch],
+                    "revision": revision,
+                    "operations": len(operations),
+                    "already_remote": already_remote,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
 
     receipt_operations = [
         CommitOperationAdd(
@@ -277,9 +358,9 @@ def main() -> int:
                 "ok": True,
                 "kind": args.kind,
                 "layers": [row["layer"] for row in layers],
-                "data_revision": revision,
+                "data_revisions": data_revisions,
                 "receipt_revision": receipt_revision,
-                "file_count": len(operations),
+                "file_count": operation_count,
                 "total_bytes": sum(row["manifest"]["total_bytes"] for row in layers),
                 "local_deleted": bool(args.delete_verified),
             },

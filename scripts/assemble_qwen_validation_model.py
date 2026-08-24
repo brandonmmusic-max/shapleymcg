@@ -140,12 +140,18 @@ attention projections, routers, and `lm_head`. Only expert allocation changes.
 | **ShapleyMCG mixed K3/K4** | **3.5** | **0.05005581795647327** | **0.908447265625** |
 | Uniform K4 | 4.0 | 0.033991548914098856 | 0.922509765625 |
 
-The selected 3.5-bpw mix is **24.9671% below the linear K3/K4 KLD
-midpoint** and **13.8995% below the geometric midpoint**. An independent
-PyTorch `kl_div` replay measured 0.05005581997721873 (about `2e-9` difference
-in the mean; maximum per-token delta `7.152557373046875e-07`) and reproduced
-top-1 exactly. The full sealed logits and reports are in the reproducibility
-dataset linked below.
+Five direct score-blind allocations at the identical 3.5 expert BPW measured
+mean KLD 0.06997419465008492 (sample SD 0.010737570027276615; range
+0.05595689276383418 to 0.08057943718460085). The selected mix is **28.4653%
+lower than that measured mean**, gains **1.6816 percentage points** in top-1
+agreement, and beats all five seeds. The score-blind summary seal is
+`ea1b34dac4ee1102016021f46e4208d0745f468440f6ac278ca5ade3719355af`.
+For descriptive context only, it is 24.9671% below the linear K3/K4 endpoint
+midpoint and 13.8995% below the geometric endpoint midpoint; neither midpoint
+is a measured naive allocation. An independent PyTorch `kl_div` replay
+measured 0.05005581997721873 (about `2e-9` difference in the mean; maximum
+per-token delta `7.152557373046875e-07`) and reproduced top-1 exactly. The full
+sealed logits and reports are in the reproducibility dataset linked below.
 
 The full candidates, calibration/Hessian artifacts, teacher and student logits,
 token window, manifests, hashes, and receipts are published in

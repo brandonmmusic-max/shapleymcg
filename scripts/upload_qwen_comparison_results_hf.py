@@ -18,6 +18,7 @@ ARTIFACTS = (
     "hill-paper-kld-v1",
     "turboderp-wiki2-kld-v1",
     "uniform-expert-controls-v1",
+    "naive-3p5-controls-v1",
 )
 
 

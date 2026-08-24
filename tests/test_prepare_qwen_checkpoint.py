@@ -56,3 +56,28 @@ def test_qwen_checkpoint_preparer_refuses_existing_destination(tmp_path):
     )
     assert result.returncode != 0
     assert "destination must not exist" in result.stderr
+
+
+def test_qwen_checkpoint_preparer_accepts_an_explicit_immutable_parent(tmp_path):
+    destination = tmp_path / "posttrained"
+    revision = "4c446470ba0aec43e22ac1128f9ffd915f338ba3"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--destination",
+            str(destination),
+            "--repository",
+            "Qwen/Qwen3-30B-A3B",
+            "--revision",
+            revision,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    plan = json.loads(result.stdout)
+    assert plan["repository"] == "Qwen/Qwen3-30B-A3B"
+    assert plan["revision"] == revision
+    assert plan["dry_run"] is True
+    assert not destination.exists()

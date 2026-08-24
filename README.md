@@ -24,9 +24,17 @@ head-to-head result. The strict same-parent controls keep attention, routers,
 and the head in BF16: uniform expert K3 measured `0.09943217778983483`, the
 3.5-bpw selected mix measured `0.05005581795647327`, and uniform expert K4
 measured `0.033991548914098856`. The selected mix is 24.9671% below the linear
-K3/K4 KLD midpoint and 13.8995% below the geometric midpoint. An independent
-PyTorch `kl_div` replay agrees with the primary mixed score to about `2e-9` in
-the mean.
+K3/K4 endpoint midpoint and 13.8995% below the geometric endpoint midpoint;
+those are descriptive interpolations, not measured naive allocations. Five
+direct score-blind 3.5-bpw allocations measured mean KLD
+`0.06997419465008492` (sample SD `0.010737570027276615`, range
+`0.05595689276383418` to `0.08057943718460085`). The selected allocation is
+28.4653% lower than that measured mean, improves top-1 agreement by 1.6816
+percentage points, and was better than all five seeds. An independent PyTorch
+`kl_div` replay agrees with the primary mixed score to about `2e-9` in the
+mean. The compact five-seed record is checked in under
+[`results/qwen3-30b-a3b-base`](results/qwen3-30b-a3b-base/naive-3p5-controls-summary.json);
+full logits and tokenwise KLD are published on Hugging Face.
 See the [complete result and provenance ledger](docs/QWEN_B200_CONTROL_RESULT.md).
 
 This is a validation-model result, not SM100 packed-runtime qualification. The

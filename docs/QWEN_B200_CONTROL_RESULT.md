@@ -180,12 +180,34 @@ Only the expert allocation changes. Attention projections, routers, and
 | **ShapleyMCG mixed K3/K4** | **3.5** | **0.05005581795647327** | **0.908447265625** |
 | Uniform K4 | 4.0 | 0.033991548914098856 | 0.922509765625 |
 
-The linear K3/K4 midpoint is 0.06671186335196684 KLD. The selected 3.5-bpw
-allocation is 24.9671% lower. It is also 13.8995% lower than the geometric
-midpoint (0.05813650948395977), and its top-1 agreement is 1.07666 percentage
-points above the endpoint midpoint. Relative to uniform K3, it reduces KLD by
-49.6583%. It does not beat uniform K4, which spends a full additional half-bit
-on every expert weight.
+The decisive naive control is measured, not interpolated. For each of five
+seeds, exactly 64 of 128 experts were assigned to K4 independently within every
+layer and projection; all remaining experts used K3. These allocations used no
+calibration, Hessian, routed-damage, or end-to-end score for placement and have
+the identical 3.5 expert logical BPW:
+
+| Score-blind seed | Mean KLD | Top-1 agreement |
+|---:|---:|---:|
+| 0 | 0.061175293046327205 | 0.897265625 |
+| 1 | 0.08057943718460085 | 0.885400390625 |
+| 2 | 0.0757252278005803 | 0.888671875 |
+| 3 | 0.07643412245508205 | 0.88603515625 |
+| 4 | 0.05595689276383418 | 0.90078125 |
+| **Five-seed mean** | **0.06997419465008492** | **0.891630859375** |
+
+The naive KLD sample SD is 0.010737570027276615 and its range is
+0.05595689276383418 to 0.08057943718460085. The selected allocation reduces
+KLD by **28.4653%** versus the measured naive mean, gains **1.6816 percentage
+points** in top-1 agreement, and beats all five score-blind seeds. The sealed
+summary SHA256 is
+`ea1b34dac4ee1102016021f46e4208d0745f468440f6ac278ca5ade3719355af`.
+
+For descriptive endpoint context, the linear K3/K4 midpoint is
+0.06671186335196684 KLD and the geometric midpoint is 0.05813650948395977;
+neither is a measured naive allocation. The selected result is 24.9671% below
+the linear midpoint and 13.8995% below the geometric midpoint. Relative to
+uniform K3, it reduces KLD by 49.6583%. It does not beat uniform K4, which
+spends a full additional half-bit on every expert weight.
 
 This same-parent control is the primary allocation-quality claim. The
 TurboDerp card remains useful external context, but it uses a different,
@@ -206,6 +228,8 @@ rules out a KL-direction, aggregation, or token-count explanation.
   `93ee33854ad8913fe7238242133efca0253c7d9c77c6d35e41cf5626f1c3e3ef`
 - Uniform-control summary seal:
   `37a5698c4f8dc7075bd18d915a1eaa409ec535f4ed1485e02705a5ca0e193b4e`
+- Five-seed score-blind summary seal:
+  `ea1b34dac4ee1102016021f46e4208d0745f468440f6ac278ca5ade3719355af`
 
 ## What this result establishes
 

@@ -147,7 +147,12 @@ def _resolved_lock(code_root: Path, run_root: Path, artifact_root: Path) -> dict
     return template
 
 
-def _result_readme(report: dict[str, Any], allocation: dict[str, Any], git_revision: str) -> str:
+def _result_readme(
+    report: dict[str, Any],
+    allocation: dict[str, Any],
+    naive: dict[str, Any],
+    git_revision: str,
+) -> str:
     summary = report["summary"]
     return f"""---
 license: other
@@ -182,8 +187,19 @@ and head fixed:
 | **ShapleyMCG mixed K3/K4** | **3.5** | **0.05005581795647327** | **0.908447265625** |
 | Uniform K4 | 4.0 | 0.033991548914098856 | 0.922509765625 |
 
-The selected mix is 24.9671% below the linear K3/K4 KLD midpoint and 13.8995%
-below the geometric midpoint. A separate PyTorch `kl_div` implementation
+Five score-blind controls independently assigned exactly half of the experts to
+K3 and half to K4 within every layer and projection, so every control has the
+same 3.5 expert logical BPW as the selected mix. Their mean KLD was
+{naive['naive_mean_kld']:.12g} (sample SD {naive['naive_sample_std_kld']:.12g};
+range {naive['naive_min_kld']:.12g} to {naive['naive_max_kld']:.12g}). The
+selected mix reduced KLD by {100 * naive['selected_kld_reduction_vs_naive_mean']:.4f}%
+relative to that measured mean; {naive['naive_seeds_beating_selected_kld']} of
+5 score-blind seeds beat it. The seed allocations, logits, tokenwise KLD, and
+reports are published and hash-bound below.
+
+For descriptive context only, the selected mix is 24.9671% below the linear
+K3/K4 endpoint midpoint and 13.8995% below the geometric endpoint midpoint;
+neither midpoint is a measured naive allocation. A separate PyTorch `kl_div` implementation
 recomputed the mixed mean as 0.05005581997721873 and matched top-1 exactly.
 The sealed panels, logits, reports, and verification are under
 `results/qwen3-30b-a3b-v1` in this dataset.
@@ -223,6 +239,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--git-revision", required=True)
     parser.add_argument("--model-publication-receipt", type=Path, required=True)
+    parser.add_argument("--comparison-publication-receipt", type=Path, required=True)
     parser.add_argument("--layers", type=int, default=48)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
@@ -240,6 +257,9 @@ def main() -> int:
         "output": str(output),
         "git_revision": args.git_revision,
         "model_publication_receipt": str(args.model_publication_receipt.resolve()),
+        "comparison_publication_receipt": str(
+            args.comparison_publication_receipt.resolve()
+        ),
         "layers": args.layers,
         "dry_run": not args.execute,
     }
@@ -260,11 +280,32 @@ def main() -> int:
     report = _read_json(kld_root / "kld-report.json")
     allocation = _read_json(kld_root / "allocation.json")
     independent = _read_json(kld_root / "independent-verification.json")
+    naive_root = artifact_root / "naive-3p5-controls-v1"
+    naive = _read_json(naive_root / "summary.json")
     model_publication = _read_json(args.model_publication_receipt.resolve())
+    comparison_publication = _read_json(args.comparison_publication_receipt.resolve())
     _verify_seal(report, "report_sha256", "KLD report")
     _verify_seal(allocation, "allocation_sha256", "allocation")
     _verify_seal(independent, "verification_sha256", "independent KLD verification")
+    _verify_seal(naive, "summary_sha256", "score-blind control summary")
     _verify_seal(model_publication, "receipt_sha256", "model publication receipt")
+    _verify_seal(
+        comparison_publication,
+        "receipt_sha256",
+        "comparison-result publication receipt",
+    )
+    if (
+        naive.get("seeds") != [0, 1, 2, 3, 4]
+        or len(naive.get("controls", [])) != 5
+        or naive.get("selected_mean_kld") != report["summary"]["mean"]
+        or naive.get("selected_top1_agreement") != report["top1_agreement"]
+    ):
+        raise ValueError("score-blind controls are not bound to the selected result")
+    published_artifacts = {
+        row.get("artifact") for row in comparison_publication.get("artifact_revisions", [])
+    }
+    if "naive-3p5-controls-v1" not in published_artifacts:
+        raise ValueError("comparison publication receipt omits score-blind controls")
     if (
         independent.get("allocation_sha256") != allocation["allocation_sha256"]
         or independent.get("kld_report_sha256") != report["report_sha256"]
@@ -317,7 +358,18 @@ def main() -> int:
         args.model_publication_receipt.resolve(): Path(
             "publication/model-publication-receipt.json"
         ),
+        args.comparison_publication_receipt.resolve(): Path(
+            "publication/comparison-results-publication-receipt.json"
+        ),
+        naive_root / "plan.json": Path("kld/score-blind-controls/plan.json"),
+        naive_root / "summary.json": Path("kld/score-blind-controls/summary.json"),
     }
+    for control in naive["controls"]:
+        label = f"seed-{int(control['seed']):03d}"
+        for name in ("allocation.json", "kld-report.json", "token-kld.npy"):
+            mappings[naive_root / label / name] = (
+                Path("kld/score-blind-controls") / label / name
+            )
     for source in sorted(kld_root.iterdir()):
         if source.is_file():
             mappings[source] = Path("kld/result") / source.name
@@ -358,7 +410,9 @@ def main() -> int:
             "nvidia_smi": _capture(["nvidia-smi", "-q"]),
         },
     )
-    (output / "README.md").write_text(_result_readme(report, allocation, args.git_revision))
+    (output / "README.md").write_text(
+        _result_readme(report, allocation, naive, args.git_revision)
+    )
     inventory = _inventory(output, exclude=frozenset({"bundle-manifest.json", "SHA256SUMS"}))
     sums = "".join(f"{row['sha256']}  {row['path']}\n" for row in inventory)
     (output / "SHA256SUMS").write_text(sums)
@@ -372,6 +426,18 @@ def main() -> int:
         "allocation_sha256": allocation["allocation_sha256"],
         "kld_report_sha256": report["report_sha256"],
         "kld_summary": report["summary"],
+        "score_blind_controls": {
+            "summary_sha256": naive["summary_sha256"],
+            "mean_kld": naive["naive_mean_kld"],
+            "sample_std_kld": naive["naive_sample_std_kld"],
+            "selected_kld_reduction_vs_mean": naive[
+                "selected_kld_reduction_vs_naive_mean"
+            ],
+            "seeds_beating_selected": naive["naive_seeds_beating_selected_kld"],
+            "comparison_publication_receipt_sha256": comparison_publication[
+                "receipt_sha256"
+            ],
+        },
         "validation_model": {
             "repo_id": model_publication["repo_id"],
             "verified_revision": model_publication["verified_revision"],

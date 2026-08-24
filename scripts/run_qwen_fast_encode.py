@@ -29,12 +29,22 @@ from quant_pipeline.normalization.prior_search import PERMUTATION_POLICIES, SCAL
 
 
 ZERO_HASH = "0" * 64
-SOURCE_IDENTITY = "373a35d7f97f49444f376a9fd0ce4b2c0a0020754a43c887eb7b7035834ff476"
 _KEY = re.compile(r"E(\d+)\.(gate_proj|up_proj|down_proj)")
 
 
 def _hash_json(value) -> str:
     return sha256_bytes(canonical_json(value))
+
+
+def _source_identity(path: Path) -> tuple[str, str]:
+    receipt = json.loads(path.read_text())
+    seal = receipt.get("receipt_sha256")
+    if seal != _hash_json({key: value for key, value in receipt.items() if key != "receipt_sha256"}):
+        raise ValueError("source-checkpoint receipt seal mismatch")
+    revision = str(receipt.get("revision", ""))
+    if not revision:
+        raise ValueError("source-checkpoint receipt omits revision")
+    return str(seal), revision
 
 
 def _matrix_vectors(value):
@@ -46,6 +56,7 @@ def _matrix_vectors(value):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument("--source-receipt", type=Path, required=True)
     parser.add_argument("--fit-root", type=Path, required=True)
     parser.add_argument("--layer", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -64,9 +75,13 @@ def main() -> int:
         parser.error("--layer must be in [0, 47]")
     fit_path = args.fit_root.resolve() / f"layer-{args.layer:03d}" / "fit-manifest.json"
     output = args.output.resolve()
+    source_identity, model_revision = _source_identity(args.source_receipt.resolve())
     plan = {
         "schema": "quant-pipeline.qwen-fast-k34-encode-plan.v1",
         "model": str(args.model.resolve()),
+        "model_revision": model_revision,
+        "source_checkpoint_identity": source_identity,
+        "source_receipt_sha256": sha256_file(args.source_receipt),
         "fit_manifest": str(fit_path),
         "fit_manifest_sha256": sha256_file(fit_path),
         "layer": args.layer,
@@ -257,7 +272,8 @@ def main() -> int:
     body = {
         "schema": "quant-pipeline.qwen-fast-k34-encode.v2",
         "plan_sha256": sha256_file(output / "encode-plan.json"),
-        "source_checkpoint_identity": SOURCE_IDENTITY,
+        "source_checkpoint_identity": source_identity,
+        "model_revision": model_revision,
         "layer": args.layer,
         "experts": sorted(fits),
         "matrix_count": len(matrices),
