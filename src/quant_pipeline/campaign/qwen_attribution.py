@@ -591,19 +591,40 @@ def verify_attribution_inputs(path: str | Path) -> tuple[dict[str, np.ndarray], 
         raise ValueError("native attribution stored layer integral does not match path gradients")
     provenance = receipt["provenance"]
     if provenance.get("test_only") is not True:
-        required_provenance = {
-            "implementation", "model_revision", "kld_window_seal_sha256",
-            "teacher_reference_sha256", "provisional_manifest_sha256", "candidate_ledger_sha256",
-            "path_nodes", "fisher_rank", "seed", "test_only",
-        }
+        implementation = provenance.get("implementation")
+        if implementation == "native-qwen-hf-uniform-k4-mcg-blend-fisher-v2":
+            required_provenance = {
+                "implementation", "model_revision", "kld_window_seal_sha256",
+                "teacher_reference_sha256", "candidate_inventory_sha256",
+                "candidate_dataset_repo", "candidate_dataset_revision",
+                "provisional_bit_triplet", "path_nodes", "fisher_rank", "seed",
+                "test_only",
+            }
+            if provenance.get("provisional_bit_triplet") != [4, 4, 4]:
+                raise ValueError("HF-native attribution must use the sealed uniform-K4 anchor")
+            if not isinstance(provenance.get("candidate_dataset_repo"), str) or not provenance["candidate_dataset_repo"]:
+                raise ValueError("HF-native attribution dataset repository is missing")
+            if not isinstance(provenance.get("candidate_dataset_revision"), str) or _REVISION.fullmatch(provenance["candidate_dataset_revision"]) is None:
+                raise ValueError("HF-native attribution dataset revision is not immutable")
+            provenance_hash_keys = (
+                "kld_window_seal_sha256", "teacher_reference_sha256",
+                "candidate_inventory_sha256",
+            )
+        else:
+            required_provenance = {
+                "implementation", "model_revision", "kld_window_seal_sha256",
+                "teacher_reference_sha256", "provisional_manifest_sha256", "candidate_ledger_sha256",
+                "path_nodes", "fisher_rank", "seed", "test_only",
+            }
+            provenance_hash_keys = (
+                "kld_window_seal_sha256", "teacher_reference_sha256",
+                "provisional_manifest_sha256", "candidate_ledger_sha256",
+            )
         if set(provenance) != required_provenance:
             raise ValueError("production native attribution provenance is incomplete")
         if not isinstance(provenance["model_revision"], str) or _REVISION.fullmatch(provenance["model_revision"]) is None:
             raise ValueError("production native attribution model revision is not immutable")
-        for key in (
-            "kld_window_seal_sha256", "teacher_reference_sha256",
-            "provisional_manifest_sha256", "candidate_ledger_sha256",
-        ):
+        for key in provenance_hash_keys:
             _require_hash(provenance[key], f"native attribution provenance {key}")
         if int(provenance["path_nodes"]) != nodes or int(provenance["fisher_rank"]) != expert_shape[3]:
             raise ValueError("native attribution provenance geometry differs from arrays")

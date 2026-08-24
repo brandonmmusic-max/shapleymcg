@@ -101,6 +101,44 @@ def test_tiny_real_qwen_native_path_gradient_fisher_closure_and_tamper(tmp_path)
         verify_attribution_inputs(path)
 
 
+def test_hf_uniform_k4_production_provenance_is_sealed_and_fail_closed(tmp_path):
+    nodes, _weights = np.polynomial.legendre.leggauss(2)
+    nodes = (nodes + 1.0) / 2.0
+    arrays = {
+        "layer_indices": np.asarray([0], dtype=np.int32),
+        "layer_deltas": np.ones((1, 1), dtype=np.float64),
+        "path_nodes": nodes,
+        "path_gradients": np.full((2, 1, 1), 0.2, dtype=np.float64),
+        "node_kld": np.asarray([0.04, 0.16], dtype=np.float64),
+        "projected_expert_residuals": np.zeros((1, 2, 2, 1), dtype=np.float64),
+        "projected_routing_residuals": np.zeros((1, 2, 1), dtype=np.float64),
+        "measured_layer_damage": np.asarray([0.2], dtype=np.float64),
+        "source_kld": np.asarray([0.0], dtype=np.float64),
+        "candidate_kld": np.asarray([0.2], dtype=np.float64),
+        "measured_end_to_end_delta": np.asarray([0.2], dtype=np.float64),
+    }
+    provenance = {
+        "implementation": "native-qwen-hf-uniform-k4-mcg-blend-fisher-v2",
+        "model_revision": "1" * 40,
+        "kld_window_seal_sha256": "2" * 64,
+        "teacher_reference_sha256": "3" * 64,
+        "candidate_inventory_sha256": "4" * 64,
+        "candidate_dataset_repo": "owner/reproducibility",
+        "candidate_dataset_revision": "5" * 40,
+        "provisional_bit_triplet": [4, 4, 4],
+        "path_nodes": 2,
+        "fisher_rank": 1,
+        "seed": 7,
+        "test_only": False,
+    }
+    path = write_attribution_inputs(tmp_path / "hf-native.npz", arrays, provenance=provenance)
+    _verified, receipt = verify_attribution_inputs(path)
+    assert receipt["provenance"] == provenance
+    wrong = dict(provenance, provisional_bit_triplet=[3, 4, 4])
+    with pytest.raises(ValueError, match="uniform-K4"):
+        write_attribution_inputs(tmp_path / "wrong-anchor.npz", arrays, provenance=wrong)
+
+
 def test_provisional_winners_persist_actual_codec_delta_and_bind_source(tmp_path):
     model = _tiny_qwen()
     experts = model.model.layers[0].mlp.experts
