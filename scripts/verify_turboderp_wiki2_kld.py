@@ -81,17 +81,27 @@ def main() -> int:
     ):
         raise ValueError("KLD report seal mismatch")
     if "teacher_files" in report:
-        expected = [row["sha256"] for row in report["teacher_files"]]
+        expected = [
+            row["sha256"] if isinstance(row, dict) else str(row)
+            for row in report["teacher_files"]
+        ]
         observed = [sha256_file(path) for path in teacher_paths]
         if expected != observed:
             raise ValueError("teacher file inventory drifted")
     if "student_files" in report:
-        expected = [row["sha256"] for row in report["student_files"]]
+        expected = [
+            row["sha256"] if isinstance(row, dict) else str(row)
+            for row in report["student_files"]
+        ]
         observed = [sha256_file(path) for path in student_paths]
         if expected != observed:
             raise ValueError("student file inventory drifted")
 
+    metric = str(report.get("metric", ""))
+    reference_mode = "float32-explicit" if metric.lower().startswith("float32") else "float64"
+
     values: list[np.ndarray] = []
+    float32_values: list[np.ndarray] = []
     torch_values: list[np.ndarray] = []
     agreements = 0
     count = 0
@@ -100,28 +110,48 @@ def main() -> int:
         student = load_logits(student_path)
         if teacher.shape != student.shape or teacher.ndim != 2:
             raise ValueError(f"logit geometry mismatch: {teacher_path.name}")
-        per_token = token_kld_float64(teacher, student)
-        values.append(per_token)
-        # Retain the float32 PyTorch/ExLlama-style value as a secondary
-        # numerical cross-check, but do not compare its per-token rounding
-        # directly against the stored float64 producer vector.
+        if reference_mode == "float64":
+            values.append(token_kld_float64(teacher, student))
+        # Recompute the historical producer's explicit float32 formula without
+        # importing the producer. Some result schemas persist this vector after
+        # widening it to float64; others persist a native float64 vector.
         teacher_torch = torch.from_numpy(teacher)
         student_torch = torch.from_numpy(student)
+        teacher_logp = F.log_softmax(teacher_torch, dim=-1)
+        student_logp = F.log_softmax(student_torch, dim=-1)
+        float32_per_token = torch.sum(
+            torch.exp(teacher_logp) * (teacher_logp - student_logp), dim=-1
+        )
+        float32_values.append(float32_per_token.numpy())
+        # Retain torch.kl_div as a second independent float32 implementation.
         torch_per_token = F.kl_div(
-            F.log_softmax(student_torch, dim=-1),
-            F.softmax(teacher_torch, dim=-1),
+            student_logp,
+            torch.exp(teacher_logp),
             reduction="none",
         ).sum(dim=-1)
         torch_values.append(torch_per_token.numpy())
         agreements += int(np.count_nonzero(teacher.argmax(-1) == student.argmax(-1)))
         count += int(teacher.shape[0])
 
-    independent = np.concatenate(values).astype(np.float64, copy=False)
+    independent = (
+        np.concatenate(values).astype(np.float64, copy=False)
+        if values
+        else None
+    )
+    float32_reference = np.concatenate(float32_values).astype(np.float32, copy=False)
     torch_reference = np.concatenate(torch_values).astype(np.float32, copy=False)
-    if independent.shape != stored.shape:
-        raise ValueError(f"token array shape mismatch: {independent.shape} != {stored.shape}")
-    delta = np.abs(independent - stored)
-    observed_mean = float(independent.mean())
+    reference = (
+        float32_reference.astype(np.float64, copy=False)
+        if reference_mode == "float32-explicit"
+        else independent
+    )
+    if reference is None or reference.shape != stored.shape:
+        raise ValueError(
+            f"token array shape mismatch: "
+            f"{None if reference is None else reference.shape} != {stored.shape}"
+        )
+    delta = np.abs(reference - stored)
+    observed_mean = float(reference.mean())
     reported_mean = float(report["summary"]["mean"])
     observed_top1 = agreements / count
     reported_top1 = float(report["top1_agreement"])
@@ -133,13 +163,22 @@ def main() -> int:
             and abs(observed_top1 - reported_top1) <= 1e-12
         ),
         "direction": "KL(bf16 teacher || quantized student)",
-        "implementation": "independent NumPy float64 log-softmax and KL reduction",
+        "reference_mode": reference_mode,
+        "implementation": (
+            "independent PyTorch float32 explicit log-softmax/exp/KL reduction"
+            if reference_mode == "float32-explicit"
+            else "independent NumPy float64 log-softmax and KL reduction"
+        ),
         "secondary_float32_implementation": (
             "torch.nn.functional.kl_div(log_softmax(student), softmax(teacher))"
         ),
         "positions": count,
         "stored_token_kld_sha256": sha256_file(root / "token-kld.npy"),
         "independent_mean": observed_mean,
+        "float64_mean": None if independent is None else float(independent.mean()),
+        "float64_mean_delta": (
+            None if independent is None else float(abs(independent.mean() - reported_mean))
+        ),
         "reported_mean": reported_mean,
         "secondary_float32_mean": float(torch_reference.astype(np.float64).mean()),
         "secondary_float32_mean_delta": float(

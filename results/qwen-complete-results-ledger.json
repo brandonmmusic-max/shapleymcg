@@ -1,0 +1,210 @@
+{
+  "schema": "shapleymcg.qwen-complete-results-ledger.v1",
+  "metric": "mean tokenwise KL(BF16 teacher || reconstructed student)",
+  "rate_scope": "logical routed-expert weight BPW unless explicitly stated",
+  "results": [
+    {
+      "id": "base-glm-predecessor",
+      "parent": "Qwen/Qwen3-30B-A3B-Base@1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9",
+      "allocator": "predecessor-routed-p2",
+      "codec": "MCG",
+      "expert_bpw": 3.5,
+      "positions": 2047,
+      "mean_kld": 0.06249572628978888,
+      "top1_agreement": 0.901319003420
+    },
+    {
+      "id": "base-glm-full-causal",
+      "parent": "Qwen/Qwen3-30B-A3B-Base@1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9",
+      "allocator": "full-aumann-shapley-fisher",
+      "codec": "MCG",
+      "expert_bpw": 3.5,
+      "positions": 2047,
+      "mean_kld": 0.05506107074246945,
+      "top1_agreement": 0.912066438691
+    },
+    {
+      "id": "base-20k-predecessor",
+      "parent": "Qwen/Qwen3-30B-A3B-Base@1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9",
+      "allocator": "predecessor-routed-p2",
+      "codec": "MCG",
+      "expert_bpw": 3.5,
+      "positions": 20480,
+      "mean_kld": 0.04908888647295481,
+      "top1_agreement": 0.908203125
+    },
+    {
+      "id": "base-20k-full-causal",
+      "parent": "Qwen/Qwen3-30B-A3B-Base@1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9",
+      "allocator": "full-aumann-shapley-fisher",
+      "codec": "MCG",
+      "expert_bpw": 3.5,
+      "positions": 20480,
+      "mean_kld": 0.04529370272688347,
+      "top1_agreement": 0.910888671875
+    },
+    {
+      "id": "base-20k-uniform-k3",
+      "parent": "Qwen/Qwen3-30B-A3B-Base@1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9",
+      "allocator": "uniform-k3",
+      "codec": "MCG",
+      "expert_bpw": 3.0,
+      "positions": 20480,
+      "mean_kld": 0.09943217778983483
+    },
+    {
+      "id": "base-20k-uniform-k4",
+      "parent": "Qwen/Qwen3-30B-A3B-Base@1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9",
+      "allocator": "uniform-k4",
+      "codec": "MCG",
+      "expert_bpw": 4.0,
+      "positions": 20480,
+      "mean_kld": 0.033991548914098856
+    },
+    {
+      "id": "base-20k-score-blind-five-seed-mean",
+      "parent": "Qwen/Qwen3-30B-A3B-Base@1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9",
+      "allocator": "score-blind-five-seed-mean",
+      "codec": "MCG",
+      "expert_bpw": 3.5,
+      "positions_per_seed": 20480,
+      "mean_kld": 0.06997419465008492,
+      "sample_sd": 0.010737570027276615
+    },
+    {
+      "id": "base-hill-reconstruction-predecessor",
+      "parent": "Qwen/Qwen3-30B-A3B-Base@1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9",
+      "allocator": "predecessor-routed-p2",
+      "codec": "MCG",
+      "expert_bpw": 3.5,
+      "positions": 32752,
+      "mean_kld": 0.018260861970005038,
+      "comparison_status": "reconstructed-not-strict-paper-reproduction"
+    },
+    {
+      "id": "posttrained-20k-predecessor-source-bf16-body",
+      "parent": "Qwen/Qwen3-30B-A3B@4c446470ba0aec43e22ac1128f9ffd915f338ba3",
+      "allocator": "predecessor-routed-p2",
+      "codec": "MCG",
+      "nonexpert_scope": "source-BF16",
+      "expert_bpw": 3.5,
+      "positions": 20480,
+      "mean_kld": 0.04112263218133531,
+      "top1_agreement": 0.924267578125
+    },
+    {
+      "id": "posttrained-20k-full-causal-source-bf16-body",
+      "parent": "Qwen/Qwen3-30B-A3B@4c446470ba0aec43e22ac1128f9ffd915f338ba3",
+      "allocator": "full-aumann-shapley-fisher",
+      "allocation_sha256": "51bf1caf86292968055a054b6b5afcdb36354fad05e1ede109303634fa7edc6e",
+      "codec": "MCG",
+      "nonexpert_scope": "source-BF16",
+      "expert_bpw": 3.5,
+      "positions": 20480,
+      "mean_kld": 0.040368551745534186,
+      "top1_agreement": 0.92568359375,
+      "report_sha256": "6c3afec640ea70a5c247f5a4cc7a73c0a9ca3feea4c4f25ec24860367115f639",
+      "independent_verification_sha256": "e363f9bb0a8bdfa33a22fc262063922f80e79be5c423c82172527a0a994bbaaa"
+    },
+    {
+      "id": "posttrained-glm-full-causal",
+      "parent": "Qwen/Qwen3-30B-A3B@4c446470ba0aec43e22ac1128f9ffd915f338ba3",
+      "allocator": "full-aumann-shapley-fisher",
+      "codec": "MCG",
+      "nonexpert_scope": "source-BF16",
+      "attention": "SDPA",
+      "expert_bpw": 3.5,
+      "positions": 2047,
+      "mean_kld": 0.031452563917093807,
+      "top1_agreement": 0.9311187103077675,
+      "report_sha256": "44d450fdcb5c3811b56489b104c533f5fd5c9240a411c2eecde0ad2c2dc54b35",
+      "independent_verification_sha256": "5046e0639e264e8984e528d9650e2102bb8b3e896a5c2e52444b3c5a0e73d0d5"
+    },
+    {
+      "id": "posttrained-hill-reconstruction-full-causal",
+      "parent": "Qwen/Qwen3-30B-A3B@4c446470ba0aec43e22ac1128f9ffd915f338ba3",
+      "allocator": "full-aumann-shapley-fisher",
+      "codec": "MCG",
+      "nonexpert_scope": "source-BF16",
+      "expert_bpw": 3.5,
+      "positions": 32752,
+      "mean_kld": 0.018888457889231755,
+      "top1_agreement": 0.9738031265266244,
+      "report_sha256": "8b5891464ab0fee3f372c992a6cfa45031236e2f9d701974d584771006890dae",
+      "independent_verification_sha256": "1b22ff77e43e35ed6d94ff7bdf02e7100460696b0cbf19703608ec9ec388d5c5",
+      "comparison_status": "reconstructed-not-strict-paper-reproduction"
+    },
+    {
+      "id": "posttrained-turbo-codec-predecessor-allocation",
+      "parent": "Qwen/Qwen3-30B-A3B@4c446470ba0aec43e22ac1128f9ffd915f338ba3",
+      "allocator": "predecessor-routed-p2",
+      "codec": "TurboDerp-EXL3-trellis",
+      "nonexpert_scope": "TurboDerp-K4-body-K6-head",
+      "expert_bpw": 3.5,
+      "positions": 20480,
+      "mean_kld": 0.030274917976982833,
+      "top1_agreement": 0.93447265625
+    },
+    {
+      "id": "posttrained-turbo-codec-full-causal-allocation",
+      "parent": "Qwen/Qwen3-30B-A3B@4c446470ba0aec43e22ac1128f9ffd915f338ba3",
+      "allocator": "full-aumann-shapley-fisher",
+      "allocation_sha256": "51bf1caf86292968055a054b6b5afcdb36354fad05e1ede109303634fa7edc6e",
+      "codec": "TurboDerp-EXL3-trellis",
+      "nonexpert_scope": "TurboDerp-K4-body-K6-head",
+      "expert_bpw": 3.5,
+      "positions": 20480,
+      "mean_kld": 0.029269076647285147,
+      "top1_agreement": 0.93720703125,
+      "report_sha256": "76129e6c6c94f067cd60d9a825d2a7a56cc93bd9fed363e8be7401777117648c",
+      "independent_verification_sha256": "7f999884d53c90208e96c95f0870026ea3d77206f557793a153ba27bdb1c8888"
+    },
+    {
+      "id": "posttrained-mcg-codec-full-causal-allocation-turbo-body",
+      "parent": "Qwen/Qwen3-30B-A3B@4c446470ba0aec43e22ac1128f9ffd915f338ba3",
+      "allocator": "full-aumann-shapley-fisher",
+      "allocation_sha256": "51bf1caf86292968055a054b6b5afcdb36354fad05e1ede109303634fa7edc6e",
+      "codec": "MCG",
+      "nonexpert_scope": "TurboDerp-K4-body-K6-head",
+      "expert_bpw": 3.5,
+      "positions": 20480,
+      "mean_kld": 0.04579310254291688,
+      "top1_agreement": 0.91884765625,
+      "report_sha256": "ad1d7d441dc15c1bc5912d35e8159fc52f3a9adf8417f287a8bee5540a2d5c17",
+      "independent_verification_sha256": "a801e6d5cf750429a2aa1dca9861d937cd973bd785751e116fa8c0657123bf02"
+    },
+    {
+      "id": "posttrained-turbo-uniform-k4",
+      "parent": "Qwen/Qwen3-30B-A3B@4c446470ba0aec43e22ac1128f9ffd915f338ba3",
+      "allocator": "uniform-k4",
+      "codec": "TurboDerp-EXL3-trellis",
+      "nonexpert_scope": "TurboDerp-K4-body-K6-head",
+      "expert_bpw": 4.0,
+      "positions": 20480,
+      "mean_kld": 0.02137210911467856,
+      "top1_agreement": 0.94345703125
+    }
+  ],
+  "publication": {
+    "posttrained_full_causal_hf_commit": "15e3c0f810c364bccb0770e39006482d70b61cb1",
+    "posttrained_full_causal_manifest_sha256": "9abb3061ad744fb1826f2bb503d900c42c8a2ff896b48653a5345b8325c99ca5",
+    "posttrained_full_causal_hub_verification_sha256": "95f701dd4bea586e97293dd26bfd158a6aef38f127664569a1830d640bb016d3",
+    "extended_validation_manifests": {
+      "hill_teacher": {
+        "files": 18,
+        "bytes": 19904840282,
+        "manifest_sha256": "e4914cefcf976a0e04d400af3e8383e8a5d8ec2613790ca314bd6d4c2dfbe3d9"
+      },
+      "hill_causal": {
+        "files": 20,
+        "bytes": 19907981222,
+        "manifest_sha256": "58a9e08c3c48dbbc27f4b863aabc1d8a235e73b115dcbcb06ccac1162a901d22"
+      },
+      "codec_isolation": {
+        "files": 28,
+        "bytes": 24893537827,
+        "manifest_sha256": "748555cb42377c08edef86a2248ccc211f3e2698c1bc57d0345ad304e9d78638"
+      }
+    }
+  }
+}

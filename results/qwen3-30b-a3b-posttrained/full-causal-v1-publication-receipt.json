@@ -1,0 +1,14 @@
+{
+  "schema": "quant-pipeline.hf-artifact-tree-verification.v1",
+  "repo": "brandonmusic/shapleymcg-qwen3-30b-a3b-posttrained-reproducibility",
+  "repo_type": "dataset",
+  "path_in_repo": "full-causal-v1",
+  "revision": "15e3c0f810c364bccb0770e39006482d70b61cb1",
+  "file_count": 48,
+  "total_bytes": 15011224030,
+  "manifest_file_sha256": "4f5c6420bc5bdcc9b9827b0d62316d52a690159e7c25ac9869318bb5c7fec101",
+  "manifest_sha256": "9abb3061ad744fb1826f2bb503d900c42c8a2ff896b48653a5345b8325c99ca5",
+  "receipt_sha256": "95f701dd4bea586e97293dd26bfd158a6aef38f127664569a1830d640bb016d3",
+  "receipt_hf_commit": "5fa56ef9239b9dfbffeaf0e7b8c9970d95e65a24",
+  "verification": "48-entry independent Hub LFS/download SHA256 replay; full per-file receipt is published in the dataset"
+}

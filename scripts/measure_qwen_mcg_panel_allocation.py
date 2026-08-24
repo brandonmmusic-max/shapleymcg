@@ -36,10 +36,6 @@ from quant_pipeline.core.artifacts import (
 from quant_pipeline.scoring.kld import summarize
 
 
-ROWS = 10
-ROW_LENGTH = 2048
-
-
 def _save_npy(path: Path, value: np.ndarray) -> str:
     buffer = io.BytesIO()
     np.save(buffer, value, allow_pickle=False)
@@ -47,26 +43,30 @@ def _save_npy(path: Path, value: np.ndarray) -> str:
     return sha256_file(path)
 
 
-def _load_panel(panel_root: Path) -> tuple[dict[str, Any], np.ndarray]:
+def _load_panel(panel_root: Path, token_key: str) -> tuple[dict[str, Any], np.ndarray]:
     panel = json.loads((panel_root / "panel.json").read_text())
     _verify_seal(panel, "panel_sha256", "WikiText comparison panel")
     token_path = panel_root / str(panel["token_file"])
     if sha256_file(token_path) != panel["token_file_sha256"]:
         raise ValueError("WikiText comparison panel token file drifted")
     with np.load(token_path) as handle:
-        token_ids = np.asarray(handle["input_ids"], dtype=np.int32)
-    if list(token_ids.shape) != [ROWS, ROW_LENGTH]:
-        raise ValueError("comparison panel is not 10x2048")
+        if token_key not in handle.files:
+            raise ValueError(f"comparison panel lacks token array {token_key!r}")
+        token_ids = np.asarray(handle[token_key], dtype=np.int32)
+    if token_ids.ndim != 2 or token_ids.shape[0] < 1 or token_ids.shape[1] < 2:
+        raise ValueError("comparison panel must be a non-empty rank-two token array")
     return panel, token_ids
 
 
-def _capture_row(model: Any, token_ids: np.ndarray) -> Any:
+def _capture_row(model: Any, token_ids: np.ndarray, *, drop_last_logit: bool) -> Any:
     import torch
 
     device = model.get_input_embeddings().weight.device
     ids = torch.from_numpy(token_ids.astype(np.int64, copy=False)).unsqueeze(0).to(device)
     with torch.inference_mode():
         logits = model(input_ids=ids, use_cache=False, return_dict=True).logits
+        if drop_last_logit:
+            logits = logits[:, :-1]
     return logits.float().cpu().reshape(-1, logits.shape[-1]).contiguous()
 
 
@@ -81,6 +81,8 @@ def main() -> int:
     parser.add_argument("--panel-root", type=Path, required=True)
     parser.add_argument("--teacher-root", type=Path, required=True)
     parser.add_argument("--teacher-receipt", type=Path, required=True)
+    parser.add_argument("--token-key", default="input_ids")
+    parser.add_argument("--drop-last-logit", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--device-map", default="balanced")
     parser.add_argument("--attention-backend", default="sdpa")
@@ -100,6 +102,8 @@ def main() -> int:
         "teacher_root": str(args.teacher_root.resolve()),
         "teacher_receipt": str(args.teacher_receipt.resolve()),
         "teacher_receipt_file_sha256": sha256_file(args.teacher_receipt),
+        "token_key": args.token_key,
+        "drop_last_logit": args.drop_last_logit,
         "output": str(args.output.resolve()),
         "device_map": args.device_map,
         "attention_backend": args.attention_backend,
@@ -129,10 +133,11 @@ def main() -> int:
     if len(choices) != 18432:
         raise ValueError("research allocation matrix inventory is incomplete")
     panel_root = args.panel_root.resolve()
-    panel, token_ids = _load_panel(panel_root)
+    panel, token_ids = _load_panel(panel_root, args.token_key)
+    rows = int(token_ids.shape[0])
     teacher_paths = sorted(args.teacher_root.resolve().glob("row-*.safetensors"))
-    if len(teacher_paths) != ROWS:
-        raise ValueError("panel teacher root must contain ten row-*.safetensors files")
+    if len(teacher_paths) != rows:
+        raise ValueError(f"panel teacher root must contain {rows} row-*.safetensors files")
     teacher_receipt = json.loads(args.teacher_receipt.read_text())
     _verify_seal(teacher_receipt, "receipt_sha256", "panel teacher receipt")
     if teacher_receipt.get("model_revision") != args.model_revision:
@@ -142,8 +147,12 @@ def main() -> int:
     if teacher_receipt.get("attention_backend") != args.attention_backend:
         raise ValueError("teacher and student attention backends differ")
     receipt_teacher_files = teacher_receipt.get("teacher_files", [])
-    if len(receipt_teacher_files) != ROWS:
-        raise ValueError("panel teacher receipt does not seal ten rows")
+    if len(receipt_teacher_files) != rows:
+        raise ValueError(f"panel teacher receipt does not seal {rows} rows")
+    if teacher_receipt.get("token_key", "input_ids") != args.token_key:
+        raise ValueError("teacher and student panel token keys differ")
+    if bool(teacher_receipt.get("drop_last_logit", False)) != args.drop_last_logit:
+        raise ValueError("teacher and student logit slicing differs")
     for path, row in zip(teacher_paths, receipt_teacher_files, strict=True):
         if sha256_file(path) != row.get("sha256"):
             raise ValueError(f"panel teacher row drifted: {path.name}")
@@ -201,7 +210,7 @@ def main() -> int:
     teacher_files = []
     student_files = []
     for index, (ids, teacher_path) in enumerate(zip(token_ids, teacher_paths, strict=True)):
-        student = _capture_row(model, ids)
+        student = _capture_row(model, ids, drop_last_logit=args.drop_last_logit)
         with safe_open(teacher_path, framework="np") as handle:
             teacher = np.asarray(handle.get_tensor("logits"), dtype=np.float32)
         values = _token_kld(teacher, student.numpy())
@@ -219,7 +228,7 @@ def main() -> int:
         per_row.append({
             "row": index,
             "summary": summarize(values),
-            "top1_agreement": top1 / ROW_LENGTH,
+            "top1_agreement": top1 / len(values),
             "teacher_sha256": teacher_files[-1]["sha256"],
             "student_sha256": student_files[-1]["sha256"],
         })
@@ -233,6 +242,8 @@ def main() -> int:
         "schema": "quant-pipeline.qwen-mcg-panel-allocation.v1",
         "model_revision": args.model_revision,
         "attention_backend": args.attention_backend,
+        "token_key": args.token_key,
+        "drop_last_logit": args.drop_last_logit,
         "panel_sha256": panel["panel_sha256"],
         "candidate_inventory_sha256": inventory["inventory_sha256"],
         "allocation_sha256": allocation["allocation_sha256"],
@@ -243,7 +254,7 @@ def main() -> int:
         "token_kld_sha256": token_kld_sha256,
         "summary": summarize(combined),
         "mean_of_row_means": float(np.mean([row["summary"]["mean"] for row in per_row])),
-        "top1_agreement": total_top1 / (ROWS * ROW_LENGTH),
+        "top1_agreement": total_top1 / len(combined),
         "per_row": per_row,
         "elapsed_seconds": time.monotonic() - started,
     }

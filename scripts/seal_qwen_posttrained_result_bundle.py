@@ -86,7 +86,7 @@ def _upload_receipts(root: Path, kind: str) -> list[dict]:
 def _card(summary: dict, naive: dict, exact_3p5: dict, git_revision: str) -> str:
     arms = summary["arms"]
     order = (
-        ("ours-selected-k34", "ShapleyMCG selected K3/K4 experts; dense BF16"),
+        ("ours-selected-k34", "Predecessor routed-p2 selected MCG K3/K4 experts; dense BF16"),
         ("ours-expert-k4", "ShapleyMCG K4 experts; dense BF16"),
         ("turboderp-full-k4", "TurboDerp full K4 body / K6 head"),
         ("hybrid-ours-experts", "TurboDerp dense K4/K6 + ShapleyMCG K4 experts"),
@@ -105,13 +105,20 @@ tags:
 - shapleymcg
 ---
 
-# Qwen3-30B-A3B post-trained matched comparison
+# Qwen3-30B-A3B post-trained predecessor-pipeline matched comparison
 
-This sealed result reruns the complete ShapleyMCG calibration, full-p2 fit,
-K3/K4 encoding, and end-to-end evaluation on the immutable post-trained parent
+This sealed result reruns the ShapleyMCG calibration, full-p2 fit, MCG K3/K4
+encoding, historical diagonal routed-p2 Hessian/router allocation, and
+end-to-end evaluation on the immutable post-trained parent
 `Qwen/Qwen3-30B-A3B@{SOURCE_REVISION}`. The historical TurboDerp comparison is
 `turboderp/Qwen3-30B-A3B-exl3@{TURBO_REVISION}`. The source relation is recorded
 as strong inferred lineage evidence, not as an upstream-authored source pin.
+
+**Allocator identity:** the selected K3/K4 result in this bundle is the
+predecessor routed-p2 allocation. It does not execute the full-model
+Aumann-Shapley/Fisher causal allocator and must not be labeled a full-method
+result. The complete method and naming rules are documented in
+[`SHAPLEYMCG_METHOD.md`](https://github.com/brandonmmusic-max/shapleymcg/blob/main/docs/SHAPLEYMCG_METHOD.md).
 
 All arms below use the same 10 x 2,048 WikiText-2 panel, the same post-trained
 BF16 teacher logits, the same Transformers BF16 replay, and no KV cache.
