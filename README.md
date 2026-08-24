@@ -66,8 +66,13 @@ rows. A separate progressive-state arm captures calibration activations from a
 sealed causal reconstruction while continuing to encode immutable BF16 source
 weights. The executable protocol and the planned matrix-level multi-factory
 ledger are documented in
-[candidate-factory selection](docs/CANDIDATE_FACTORY_SELECTION.md). No result
-claim is made until the untouched validation endpoint is sealed.
+[candidate-factory selection](docs/CANDIDATE_FACTORY_SELECTION.md). The
+model-agnostic `quant_pipeline.candidates.factory_union` boundary makes native
+MCG coverage mandatory, admits upstream/ModelOpt-style proposals additively,
+common-scores every reconstruction, and hands `(factory, rate)` alternatives
+to the existing exact-byte allocator. A new model therefore never depends on
+prepublished upstream candidates. No result claim is made until the untouched
+validation endpoint is sealed.
 
 ## Base-model causal allocation result
 

@@ -31,6 +31,16 @@ from .ledger import (
     validate_ledger,
 )
 from .payload_store import ExactPayloadStore
+from .factory_union import (
+    CandidateFactory,
+    CandidateUnit,
+    CommonCandidateScore,
+    CommonCandidateScorer,
+    FactoryIdentity,
+    FactoryProposal,
+    FactoryUnion,
+    build_factory_union,
+)
 
 __all__ = [
     "BackendAttestation",
@@ -62,4 +72,12 @@ __all__ = [
     "validate_candidate_record",
     "validate_ledger",
     "ExactPayloadStore",
+    "CandidateFactory",
+    "CandidateUnit",
+    "CommonCandidateScore",
+    "CommonCandidateScorer",
+    "FactoryIdentity",
+    "FactoryProposal",
+    "FactoryUnion",
+    "build_factory_union",
 ]

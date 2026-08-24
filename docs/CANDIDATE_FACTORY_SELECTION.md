@@ -11,6 +11,29 @@ Candidate generation and candidate allocation are therefore tested as separate
 causal factors. The upstream EXL3 factory is an additional candidate source,
 not a baseline to discard and not an attribution shortcut.
 
+## Production architecture: candidate union is part of the method
+
+The production pipeline does not choose one encoder family in advance. Its
+candidate stage registers the native MCG factory as required and may register
+ModelOpt, upstream EXL3, or future factories as additional proposers. For every
+independently allocatable weight unit and requested rate, all available
+factories write exact-byte, hash-addressed reconstruction proposals into one
+ledger. The pipeline then:
+
+1. scores every reconstruction through the same Shapley/Fisher/Jacobian
+   instrument owned by this method;
+2. applies only cross-fitted causal calibration factors learned outside the
+   final evaluation rows;
+3. gives the exact-byte allocator all `(factory, rate)` alternatives; and
+4. accepts the reconstructed allocation only through untouched end-to-end KLD.
+
+Factory-reported MSE, Hessian loss, or KLD may be retained as provenance but is
+never an allocation objective. `quant_pipeline.candidates.factory_union`
+defines and seals this model-agnostic boundary. The required native MCG factory
+must cover every unit/rate pair, so a new model remains fully quantizable when
+no upstream checkpoint or model-specific factory exists. Optional factories
+are additive arrows in the candidate-selection quiver, not dependencies.
+
 ## Whole-layer factory-union experiment
 
 `scripts/measure_qwen_candidate_factory_union.py` freezes all of the following:
