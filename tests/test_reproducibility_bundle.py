@@ -8,6 +8,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+from quant_pipeline.campaign.qwen_adapter import REQUIRED_SCIENTIFIC_CONTRACT
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "configs/qwen3-30b-a3b-b200"
@@ -35,8 +37,7 @@ def test_qwen_example_configs_parse_and_bind_exact_geometry():
     assert all(SHA256.fullmatch(value) for value in artifact["b12x"]["closure"].values())
     assert adapter["schema"] == "quant-pipeline.qwen-production-adapter.v1"
     assert (adapter["num_hidden_layers"], adapter["num_experts"], adapter["hidden_size"], adapter["moe_intermediate_size"]) == (48, 128, 2048, 768)
-    assert adapter["scientific_contract"]["normalization"] == "source-derived-absolute-v31"
-    assert adapter["scientific_contract"]["allocation_objective"].startswith("signed-shapley-fisher")
+    assert adapter["scientific_contract"] == REQUIRED_SCIENTIFIC_CONTRACT
     assert adapter["attention_backend"] == "eager"
     assert adapter["fisher_rank"] == experiment["objective"]["fisher_rank"] == 32
     assert adapter["attribution_fisher_rank"] == 8

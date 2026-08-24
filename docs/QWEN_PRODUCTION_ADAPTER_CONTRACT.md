@@ -39,6 +39,7 @@ Production configuration must also carry this exact fail-closed declaration:
     "normalization": "source-derived-absolute-v31",
     "gss": "per-matrix-selected-bit-k3-k4-k5",
     "transform_search": "additive-ablation-against-v31-baseline",
+    "allocation_objective": "signed-shapley-fisher-provisional-ratio-v1-with-proxy-control",
     "candidate_payloads": "exact-packed-vectors-reconstruction",
     "checkpoint": "upstream-btx-atoms-v1-pinned"
   }

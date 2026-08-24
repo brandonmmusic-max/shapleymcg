@@ -29,6 +29,14 @@ from .runner import StageRequest, StageResult
 ADAPTER_SCHEMA = "quant-pipeline.qwen-production-adapter.v1"
 STAGE_MANIFEST_SCHEMA = "quant-pipeline.qwen-stage-artifacts.v1"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+REQUIRED_SCIENTIFIC_CONTRACT = {
+    "normalization": "source-derived-absolute-v31",
+    "gss": "per-matrix-selected-bit-k3-k4-k5",
+    "transform_search": "additive-ablation-against-v31-baseline",
+    "allocation_objective": "signed-shapley-fisher-provisional-ratio-v1-with-proxy-control",
+    "candidate_payloads": "exact-packed-vectors-reconstruction",
+    "checkpoint": "upstream-btx-atoms-v1-pinned",
+}
 
 
 @runtime_checkable
@@ -513,13 +521,7 @@ class QwenCampaignAdapter:
         ):
             raise RuntimeError("production preflight requires the attested corrected EXL3/MCG R10 codec")
         scientific = config.get("scientific_contract", {})
-        required_contract = {
-            "normalization": "source-derived-absolute-v31",
-            "gss": "per-matrix-selected-bit-k3-k4-k5",
-            "transform_search": "additive-ablation-against-v31-baseline",
-            "candidate_payloads": "exact-packed-vectors-reconstruction",
-            "checkpoint": "upstream-btx-atoms-v1-pinned",
-        }
+        required_contract = REQUIRED_SCIENTIFIC_CONTRACT
         if self.production and scientific != required_contract:
             raise RuntimeError(
                 "production preflight requires the additive prior-3.5-bpw scientific contract; "
