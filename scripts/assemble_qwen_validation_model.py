@@ -56,10 +56,13 @@ def _load_inputs(kld_root: Path) -> tuple[dict, dict, dict, dict[tuple[int, int,
         or allocation.get("average_weight_bits") != 3.5
         or allocation.get("k3_count") != len(choices) // 2
         or allocation.get("k4_count") != len(choices) // 2
-        or verification.get("allocation_sha256") != allocation["allocation_sha256"]
-        or verification.get("kld_report_sha256") != report["report_sha256"]
+        or report.get("allocation_sha256") != allocation["allocation_sha256"]
+        or verification.get("report_sha256") != report["report_sha256"]
+        or verification.get("student_sha256") != report["student_sha256"]
+        or verification.get("teacher_sha256") != report["teacher_sha256"]
+        or float(verification.get("max_token_kld_difference", float("inf"))) > 1e-9
     ):
-        raise ValueError("KLD inputs are not the independently verified exact-half-K4 control")
+        raise ValueError("KLD inputs are not the independently verified exact-3.5 causal result")
     return allocation, report, verification, choices
 
 
@@ -67,6 +70,85 @@ def _candidate_key(choice: dict) -> str:
     return (
         f"K{int(choice['bits'])}.E{int(choice['expert']):03d}."
         f"{choice['projection']}.reconstruction_hf"
+    )
+
+
+def _load_publication_evidence(
+    causal_comparison_path: Path,
+    panel_report_path: Path,
+    panel_control_report_path: Path,
+    panel_verification_path: Path,
+    panel_control_verification_path: Path,
+    allocation: dict,
+    report: dict,
+) -> tuple[dict, dict, dict, dict, dict]:
+    comparison = json.loads(causal_comparison_path.read_text())
+    panel_report = json.loads(panel_report_path.read_text())
+    panel_control_report = json.loads(panel_control_report_path.read_text())
+    panel_verification = json.loads(panel_verification_path.read_text())
+    panel_control_verification = json.loads(panel_control_verification_path.read_text())
+    _verify_seal(comparison, "comparison_sha256", "causal/control comparison")
+    _verify_seal(panel_report, "report_sha256", "causal panel report")
+    _verify_seal(panel_control_report, "report_sha256", "control panel report")
+    _verify_seal(panel_verification, "verification_sha256", "causal panel verification")
+    _verify_seal(
+        panel_control_verification,
+        "verification_sha256",
+        "control panel verification",
+    )
+    causal = comparison.get("causal", {})
+    control = comparison.get("historical_control", {})
+    effect = comparison.get("effect", {})
+    expected_relative = 1.0 - float(causal.get("mean_kld", float("nan"))) / float(
+        control.get("mean_kld", float("nan"))
+    )
+    expected_top1_delta = float(causal.get("top1_agreement", float("nan"))) - float(
+        control.get("top1_agreement", float("nan"))
+    )
+    if (
+        causal.get("allocation_sha256") != allocation["allocation_sha256"]
+        or causal.get("report_sha256") != report["report_sha256"]
+        or causal.get("mean_kld") != report.get("summary", {}).get("mean")
+        or causal.get("top1_agreement") != report.get("top1_agreement")
+        or comparison.get("protocol", {}).get("attention_backend") != "sdpa"
+        or comparison.get("rate", {}).get("logical_bpw") != 3.5
+        or comparison.get("rate", {}).get("k3_matrix_count") != 9216
+        or comparison.get("rate", {}).get("k4_matrix_count") != 9216
+        or abs(float(effect.get("relative_kld_reduction", float("nan"))) - expected_relative)
+        > 1e-15
+        or abs(float(effect.get("top1_agreement_delta", float("nan"))) - expected_top1_delta)
+        > 1e-15
+        or panel_report.get("allocation_sha256") != allocation["allocation_sha256"]
+        or panel_control_report.get("allocation_sha256")
+        != comparison.get("historical_control", {}).get("allocation_sha256")
+        or panel_report.get("panel_sha256") != panel_control_report.get("panel_sha256")
+        or panel_report.get("attention_backend") != "sdpa"
+        or panel_control_report.get("attention_backend") != "sdpa"
+        or panel_report.get("teacher_files") != panel_control_report.get("teacher_files")
+        or panel_report.get("summary", {}).get("count") != 20480
+        or panel_control_report.get("summary", {}).get("count") != 20480
+        or panel_verification.get("report_sha256") != panel_report["report_sha256"]
+        or panel_control_verification.get("report_sha256")
+        != panel_control_report["report_sha256"]
+        or panel_verification.get("panel_sha256") != panel_report["panel_sha256"]
+        or panel_control_verification.get("panel_sha256")
+        != panel_control_report["panel_sha256"]
+        or panel_verification.get("positions") != 20480
+        or panel_control_verification.get("positions") != 20480
+        or panel_verification.get("attention_backend") != "sdpa"
+        or panel_control_verification.get("attention_backend") != "sdpa"
+        or not panel_verification.get("ok")
+        or not panel_control_verification.get("ok")
+        or float(panel_verification.get("max_absolute_delta", float("inf"))) > 1e-10
+        or float(panel_control_verification.get("max_absolute_delta", float("inf"))) > 1e-10
+    ):
+        raise ValueError("model-card comparison evidence is not a matched SDPA panel")
+    return (
+        comparison,
+        panel_report,
+        panel_control_report,
+        panel_verification,
+        panel_control_verification,
     )
 
 
@@ -81,8 +163,24 @@ def _copy_support_files(source: Path, output: Path) -> None:
         shutil.copy2(path, output / path.name)
 
 
-def _model_card(report: dict, allocation: dict, verification: dict) -> str:
+def _model_card(
+    report: dict,
+    allocation: dict,
+    verification: dict,
+    comparison: dict,
+    panel_report: dict,
+    panel_control_report: dict,
+    panel_verification: dict,
+    panel_control_verification: dict,
+) -> str:
     summary = report["summary"]
+    effect = comparison["effect"]
+    causal = comparison["causal"]
+    control = comparison["historical_control"]
+    panel_reduction = 1.0 - (
+        float(panel_report["summary"]["mean"])
+        / float(panel_control_report["summary"]["mean"])
+    )
     return f"""---
 library_name: transformers
 license: apache-2.0
@@ -128,30 +226,44 @@ Allocation SHA256: `{allocation['allocation_sha256']}`
 KLD report seal: `{report['report_sha256']}`  
 Independent verification seal: `{verification['verification_sha256']}`
 
-## Same-parent 20k WikiText control
+## Controlled causal-allocation result
 
-All three rows below use this exact `Qwen3-30B-A3B-Base` parent, the same
-sealed ten-by-2,048-token panel and BF16 teacher logits, and source-BF16
-attention projections, routers, and `lm_head`. Only expert allocation changes.
+The historical and causal arms use the same exact `Qwen3-30B-A3B-Base`
+revision, candidate reconstructions, 9,216 K3 plus 9,216 K4 matrix choices,
+sealed BF16 teacher, token IDs, SDPA attention implementation, and four-layer
+reanchoring cadence. Only the exact-rate expert-matrix allocation changes.
 
-| Expert allocation | Expert logical BPW | Mean KLD | Top-1 agreement |
-|---|---:|---:|---:|
-| Uniform K3 | 3.0 | 0.09943217778983483 | 0.8728515625 |
-| **ShapleyMCG mixed K3/K4** | **3.5** | **0.05005581795647327** | **0.908447265625** |
-| Uniform K4 | 4.0 | 0.033991548914098856 | 0.922509765625 |
+| Exact-3.5 routed-expert allocation | Mean KLD | Top-1 agreement |
+|---|---:|---:|
+| Historical Hessian/router allocation | {control['mean_kld']:.12g} | {control['top1_agreement']:.12g} |
+| **Aumann–Shapley/Fisher causal allocation** | **{causal['mean_kld']:.12g}** | **{causal['top1_agreement']:.12g}** |
 
-Five direct score-blind allocations at the identical 3.5 expert BPW measured
-mean KLD 0.06997419465008492 (sample SD 0.010737570027276615; range
-0.05595689276383418 to 0.08057943718460085). The selected mix is **28.4653%
-lower than that measured mean**, gains **1.6816 percentage points** in top-1
-agreement, and beats all five seeds. The score-blind summary seal is
-`ea1b34dac4ee1102016021f46e4208d0745f468440f6ac278ca5ade3719355af`.
-For descriptive context only, it is 24.9671% below the linear K3/K4 endpoint
-midpoint and 13.8995% below the geometric endpoint midpoint; neither midpoint
-is a measured naive allocation. An independent PyTorch `kl_div` replay
-measured 0.05005581997721873 (about `2e-9` difference in the mean; maximum
-per-token delta `7.152557373046875e-07`) and reproduced top-1 exactly. The full
-sealed logits and reports are in the reproducibility dataset linked below.
+The causal allocation lowers KLD by **{100.0 * effect['relative_kld_reduction']:.4f}%**
+and gains **{100.0 * effect['top1_agreement_delta']:.4f} percentage points** in
+top-1 agreement. It changes {effect['changed_matrix_choices']:,} of the 18,432
+matrix choices without changing the exact logical rate or stored candidate
+payload budget. The independent float64 replay differs by at most
+`{verification['max_token_kld_difference']:.3g}` per token.
+
+## Same-parent 20,480-position WikiText replication
+
+The broader panel follows ExLlamaV3's published WikiText construction (ten
+consecutive 2,048-token rows), but both arms and the BF16 teacher are executed
+with Transformers SDPA. It is therefore a matched internal replication—not a
+claim that Transformers SDPA and ExLlamaV3-native attention are numerically
+identical.
+
+| Exact-3.5 routed-expert allocation | Mean KLD | Top-1 agreement |
+|---|---:|---:|
+| Historical Hessian/router allocation | {panel_control_report['summary']['mean']:.12g} | {panel_control_report['top1_agreement']:.12g} |
+| **Aumann–Shapley/Fisher causal allocation** | **{panel_report['summary']['mean']:.12g}** | **{panel_report['top1_agreement']:.12g}** |
+
+The causal allocation lowers 20k-panel KLD by **{100.0 * panel_reduction:.4f}%**.
+Independent float64 replay has maximum per-token differences of
+`{panel_verification['max_absolute_delta']:.3g}` for the causal arm and
+`{panel_control_verification['max_absolute_delta']:.3g}` for the historical
+arm. The complete teacher/student logits, per-token vectors, reports, manifests,
+and verification artifacts are retained in the reproducibility dataset.
 
 The full candidates, calibration/Hessian artifacts, teacher and student logits,
 token window, manifests, hashes, and receipts are published in
@@ -173,8 +285,12 @@ model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype="auto", devic
 
 - Base model: the Qwen team, [`Qwen/Qwen3-30B-A3B-Base`](https://huggingface.co/Qwen/Qwen3-30B-A3B-Base).
 - EXL3/TRELLIS codec lineage: turboderp and ExLlamaV3 contributors.
-- Shapley/value-attribution and Hessian-guided allocation references are
-  enumerated with links in the GitHub methodology and sealed dataset card.
+- Aumann–Shapley quantization precedent: Joshua Hill,
+  [`Saturation Makes Quantization Error Additive`](https://arxiv.org/abs/2607.12266),
+  and NVIDIA Model Optimizer PR #2183.
+- Routed Fisher/Jacobian attribution, exact-rate reconciliation, and MCG
+  integration are described and attributed in the GitHub methodology and
+  sealed dataset card.
 - Experiment, integration, and publication: Brandon Music / ShapleyMCG.
 """
 
@@ -218,6 +334,11 @@ def main() -> int:
     parser.add_argument("--encode-root", type=Path, required=True)
     parser.add_argument("--kld-root", type=Path, required=True)
     parser.add_argument("--kld-window", type=Path, required=True)
+    parser.add_argument("--causal-comparison", type=Path, required=True)
+    parser.add_argument("--panel-report", type=Path, required=True)
+    parser.add_argument("--panel-control-report", type=Path, required=True)
+    parser.add_argument("--panel-verification", type=Path, required=True)
+    parser.add_argument("--panel-control-verification", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--attention-backend", default="eager")
     parser.add_argument("--execute", action="store_true")
@@ -229,6 +350,16 @@ def main() -> int:
         "encode_root": str(args.encode_root.resolve()),
         "kld_root": str(args.kld_root.resolve()),
         "kld_window": str(args.kld_window.resolve()),
+        "causal_comparison": str(args.causal_comparison.resolve()),
+        "causal_comparison_file_sha256": sha256_file(args.causal_comparison),
+        "panel_report": str(args.panel_report.resolve()),
+        "panel_report_file_sha256": sha256_file(args.panel_report),
+        "panel_control_report": str(args.panel_control_report.resolve()),
+        "panel_control_report_file_sha256": sha256_file(args.panel_control_report),
+        "panel_verification": str(args.panel_verification.resolve()),
+        "panel_verification_file_sha256": sha256_file(args.panel_verification),
+        "panel_control_verification": str(args.panel_control_verification.resolve()),
+        "panel_control_verification_file_sha256": sha256_file(args.panel_control_verification),
         "output": str(args.output.resolve()),
         "attention_backend": args.attention_backend,
         "dry_run": not args.execute,
@@ -254,6 +385,21 @@ def main() -> int:
     output.mkdir(parents=True)
     write_json(output / "assembly-plan.json", plan | {"dry_run": False})
     allocation, report, verification, choices = _load_inputs(kld_root)
+    (
+        comparison,
+        panel_report,
+        panel_control_report,
+        panel_verification,
+        panel_control_verification,
+    ) = _load_publication_evidence(
+        args.causal_comparison,
+        args.panel_report,
+        args.panel_control_report,
+        args.panel_verification,
+        args.panel_control_verification,
+        allocation,
+        report,
+    )
     index_path = source / "model.safetensors.index.json"
     index = json.loads(index_path.read_text())
     weight_map = dict(index["weight_map"])
@@ -372,6 +518,16 @@ def main() -> int:
         "kld_report_file_sha256": sha256_file(kld_root / "kld-report.json"),
         "independent_verification_sha256": verification["verification_sha256"],
         "independent_verification_file_sha256": sha256_file(kld_root / "independent-verification.json"),
+        "causal_comparison_sha256": comparison["comparison_sha256"],
+        "causal_comparison_file_sha256": sha256_file(args.causal_comparison),
+        "panel_report_sha256": panel_report["report_sha256"],
+        "panel_report_file_sha256": sha256_file(args.panel_report),
+        "panel_control_report_sha256": panel_control_report["report_sha256"],
+        "panel_control_report_file_sha256": sha256_file(args.panel_control_report),
+        "panel_verification_sha256": panel_verification["verification_sha256"],
+        "panel_verification_file_sha256": sha256_file(args.panel_verification),
+        "panel_control_verification_sha256": panel_control_verification["verification_sha256"],
+        "panel_control_verification_file_sha256": sha256_file(args.panel_control_verification),
         "model_logit_verification_sha256": logit_verification["verification_sha256"],
         "replacement_count": replacement_count,
         "storage_dtype": "bfloat16",
@@ -383,7 +539,18 @@ def main() -> int:
     }
     provenance["provenance_sha256"] = _hash_json(provenance)
     write_json(output / "provenance.json", provenance)
-    (output / "README.md").write_text(_model_card(report, allocation, verification))
+    (output / "README.md").write_text(
+        _model_card(
+            report,
+            allocation,
+            verification,
+            comparison,
+            panel_report,
+            panel_control_report,
+            panel_verification,
+            panel_control_verification,
+        )
+    )
     _write_sha256s(output)
     manifest = _seal_manifest(output, provenance)
     print(json.dumps({"ok": True, "manifest_sha256": manifest["manifest_sha256"], **provenance}), flush=True)
