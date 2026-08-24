@@ -21,6 +21,7 @@ def main() -> int:
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--kld-root", type=Path, required=True)
     parser.add_argument("--causal-comparison", type=Path, required=True)
+    parser.add_argument("--panel-comparison", type=Path, required=True)
     parser.add_argument("--panel-report", type=Path, required=True)
     parser.add_argument("--panel-control-report", type=Path, required=True)
     parser.add_argument("--panel-verification", type=Path, required=True)
@@ -31,12 +32,14 @@ def main() -> int:
     allocation, report, verification, _ = _load_inputs(args.kld_root.resolve())
     (
         comparison,
+        panel_comparison,
         panel_report,
         panel_control_report,
         panel_verification,
         panel_control_verification,
     ) = _load_publication_evidence(
         args.causal_comparison,
+        args.panel_comparison,
         args.panel_report,
         args.panel_control_report,
         args.panel_verification,
@@ -57,6 +60,7 @@ def main() -> int:
         raise ValueError("model/logit-verification identity mismatch")
     expected_evidence = {
         "causal_comparison_sha256": comparison["comparison_sha256"],
+        "panel_comparison_sha256": panel_comparison["comparison_sha256"],
         "panel_report_sha256": panel_report["report_sha256"],
         "panel_control_report_sha256": panel_control_report["report_sha256"],
         "panel_verification_sha256": panel_verification["verification_sha256"],
@@ -74,6 +78,7 @@ def main() -> int:
             allocation,
             verification,
             comparison,
+            panel_comparison,
             panel_report,
             panel_control_report,
             panel_verification,

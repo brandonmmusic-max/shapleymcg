@@ -75,19 +75,22 @@ def _candidate_key(choice: dict) -> str:
 
 def _load_publication_evidence(
     causal_comparison_path: Path,
+    panel_comparison_path: Path,
     panel_report_path: Path,
     panel_control_report_path: Path,
     panel_verification_path: Path,
     panel_control_verification_path: Path,
     allocation: dict,
     report: dict,
-) -> tuple[dict, dict, dict, dict, dict]:
+) -> tuple[dict, dict, dict, dict, dict, dict]:
     comparison = json.loads(causal_comparison_path.read_text())
+    panel_comparison = json.loads(panel_comparison_path.read_text())
     panel_report = json.loads(panel_report_path.read_text())
     panel_control_report = json.loads(panel_control_report_path.read_text())
     panel_verification = json.loads(panel_verification_path.read_text())
     panel_control_verification = json.loads(panel_control_verification_path.read_text())
     _verify_seal(comparison, "comparison_sha256", "causal/control comparison")
+    _verify_seal(panel_comparison, "comparison_sha256", "panel causal/control comparison")
     _verify_seal(panel_report, "report_sha256", "causal panel report")
     _verify_seal(panel_control_report, "report_sha256", "control panel report")
     _verify_seal(panel_verification, "verification_sha256", "causal panel verification")
@@ -105,6 +108,15 @@ def _load_publication_evidence(
     expected_top1_delta = float(causal.get("top1_agreement", float("nan"))) - float(
         control.get("top1_agreement", float("nan"))
     )
+    panel_causal = panel_comparison.get("causal", {})
+    panel_control = panel_comparison.get("historical_control", {})
+    panel_effect = panel_comparison.get("effect", {})
+    expected_panel_relative = 1.0 - float(
+        panel_causal.get("mean_kld", float("nan"))
+    ) / float(panel_control.get("mean_kld", float("nan")))
+    expected_panel_top1_delta = float(
+        panel_causal.get("top1_agreement", float("nan"))
+    ) - float(panel_control.get("top1_agreement", float("nan")))
     if (
         causal.get("allocation_sha256") != allocation["allocation_sha256"]
         or causal.get("report_sha256") != report["report_sha256"]
@@ -141,10 +153,40 @@ def _load_publication_evidence(
         or not panel_control_verification.get("ok")
         or float(panel_verification.get("max_absolute_delta", float("inf"))) > 1e-10
         or float(panel_control_verification.get("max_absolute_delta", float("inf"))) > 1e-10
+        or panel_causal.get("allocation_sha256") != panel_report["allocation_sha256"]
+        or panel_causal.get("report_sha256") != panel_report["report_sha256"]
+        or panel_causal.get("verification_sha256")
+        != panel_verification["verification_sha256"]
+        or panel_causal.get("mean_kld") != panel_report["summary"]["mean"]
+        or panel_causal.get("top1_agreement") != panel_report["top1_agreement"]
+        or panel_control.get("allocation_sha256")
+        != panel_control_report["allocation_sha256"]
+        or panel_control.get("report_sha256") != panel_control_report["report_sha256"]
+        or panel_control.get("verification_sha256")
+        != panel_control_verification["verification_sha256"]
+        or panel_control.get("mean_kld") != panel_control_report["summary"]["mean"]
+        or panel_control.get("top1_agreement")
+        != panel_control_report["top1_agreement"]
+        or panel_comparison.get("protocol", {}).get("attention_backend") != "sdpa"
+        or panel_comparison.get("protocol", {}).get("positions") != 20480
+        or panel_comparison.get("rate", {}).get("logical_bpw") != 3.5
+        or panel_comparison.get("rate", {}).get("k3_matrix_count") != 9216
+        or panel_comparison.get("rate", {}).get("k4_matrix_count") != 9216
+        or abs(
+            float(panel_effect.get("relative_kld_reduction", float("nan")))
+            - expected_panel_relative
+        )
+        > 1e-15
+        or abs(
+            float(panel_effect.get("top1_agreement_delta", float("nan")))
+            - expected_panel_top1_delta
+        )
+        > 1e-15
     ):
         raise ValueError("model-card comparison evidence is not a matched SDPA panel")
     return (
         comparison,
+        panel_comparison,
         panel_report,
         panel_control_report,
         panel_verification,
@@ -168,6 +210,7 @@ def _model_card(
     allocation: dict,
     verification: dict,
     comparison: dict,
+    panel_comparison: dict,
     panel_report: dict,
     panel_control_report: dict,
     panel_verification: dict,
@@ -177,10 +220,7 @@ def _model_card(
     effect = comparison["effect"]
     causal = comparison["causal"]
     control = comparison["historical_control"]
-    panel_reduction = 1.0 - (
-        float(panel_report["summary"]["mean"])
-        / float(panel_control_report["summary"]["mean"])
-    )
+    panel_effect = panel_comparison["effect"]
     return f"""---
 library_name: transformers
 license: apache-2.0
@@ -258,7 +298,10 @@ identical.
 | Historical Hessian/router allocation | {panel_control_report['summary']['mean']:.12g} | {panel_control_report['top1_agreement']:.12g} |
 | **Aumann–Shapley/Fisher causal allocation** | **{panel_report['summary']['mean']:.12g}** | **{panel_report['top1_agreement']:.12g}** |
 
-The causal allocation lowers 20k-panel KLD by **{100.0 * panel_reduction:.4f}%**.
+The causal allocation lowers 20k-panel KLD by
+**{100.0 * panel_effect['relative_kld_reduction']:.4f}%** and gains
+**{100.0 * panel_effect['top1_agreement_delta']:.4f} percentage points** in
+top-1 agreement.
 Independent float64 replay has maximum per-token differences of
 `{panel_verification['max_absolute_delta']:.3g}` for the causal arm and
 `{panel_control_verification['max_absolute_delta']:.3g}` for the historical
@@ -335,6 +378,7 @@ def main() -> int:
     parser.add_argument("--kld-root", type=Path, required=True)
     parser.add_argument("--kld-window", type=Path, required=True)
     parser.add_argument("--causal-comparison", type=Path, required=True)
+    parser.add_argument("--panel-comparison", type=Path, required=True)
     parser.add_argument("--panel-report", type=Path, required=True)
     parser.add_argument("--panel-control-report", type=Path, required=True)
     parser.add_argument("--panel-verification", type=Path, required=True)
@@ -352,6 +396,8 @@ def main() -> int:
         "kld_window": str(args.kld_window.resolve()),
         "causal_comparison": str(args.causal_comparison.resolve()),
         "causal_comparison_file_sha256": sha256_file(args.causal_comparison),
+        "panel_comparison": str(args.panel_comparison.resolve()),
+        "panel_comparison_file_sha256": sha256_file(args.panel_comparison),
         "panel_report": str(args.panel_report.resolve()),
         "panel_report_file_sha256": sha256_file(args.panel_report),
         "panel_control_report": str(args.panel_control_report.resolve()),
@@ -387,12 +433,14 @@ def main() -> int:
     allocation, report, verification, choices = _load_inputs(kld_root)
     (
         comparison,
+        panel_comparison,
         panel_report,
         panel_control_report,
         panel_verification,
         panel_control_verification,
     ) = _load_publication_evidence(
         args.causal_comparison,
+        args.panel_comparison,
         args.panel_report,
         args.panel_control_report,
         args.panel_verification,
@@ -520,6 +568,8 @@ def main() -> int:
         "independent_verification_file_sha256": sha256_file(kld_root / "independent-verification.json"),
         "causal_comparison_sha256": comparison["comparison_sha256"],
         "causal_comparison_file_sha256": sha256_file(args.causal_comparison),
+        "panel_comparison_sha256": panel_comparison["comparison_sha256"],
+        "panel_comparison_file_sha256": sha256_file(args.panel_comparison),
         "panel_report_sha256": panel_report["report_sha256"],
         "panel_report_file_sha256": sha256_file(args.panel_report),
         "panel_control_report_sha256": panel_control_report["report_sha256"],
@@ -545,6 +595,7 @@ def main() -> int:
             allocation,
             verification,
             comparison,
+            panel_comparison,
             panel_report,
             panel_control_report,
             panel_verification,

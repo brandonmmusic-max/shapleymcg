@@ -92,12 +92,44 @@ def _evidence(tmp_path: Path) -> tuple[dict, dict, list[Path]]:
             "verification_sha256",
         )
 
+    causal_verification = verification(causal_report)
+    control_verification = verification(control_report)
+    panel_comparison = _sealed(
+        {
+            "causal": {
+                "allocation_sha256": causal_allocation,
+                "mean_kld": 0.045,
+                "report_sha256": causal_report["report_sha256"],
+                "top1_agreement": 0.911,
+                "verification_sha256": causal_verification["verification_sha256"],
+            },
+            "historical_control": {
+                "allocation_sha256": control_allocation,
+                "mean_kld": 0.052,
+                "report_sha256": control_report["report_sha256"],
+                "top1_agreement": 0.903,
+                "verification_sha256": control_verification["verification_sha256"],
+            },
+            "effect": {
+                "relative_kld_reduction": 1.0 - 0.045 / 0.052,
+                "top1_agreement_delta": 0.008,
+            },
+            "protocol": {"attention_backend": "sdpa", "positions": 20480},
+            "rate": {
+                "k3_matrix_count": 9216,
+                "k4_matrix_count": 9216,
+                "logical_bpw": 3.5,
+            },
+        },
+        "comparison_sha256",
+    )
     paths = [
         _write(tmp_path / "comparison.json", comparison),
+        _write(tmp_path / "panel-comparison.json", panel_comparison),
         _write(tmp_path / "causal-report.json", causal_report),
         _write(tmp_path / "control-report.json", control_report),
-        _write(tmp_path / "causal-verification.json", verification(causal_report)),
-        _write(tmp_path / "control-verification.json", verification(control_report)),
+        _write(tmp_path / "causal-verification.json", causal_verification),
+        _write(tmp_path / "control-verification.json", control_verification),
     ]
     report = {
         "report_sha256": "single-report",
@@ -110,20 +142,20 @@ def _evidence(tmp_path: Path) -> tuple[dict, dict, list[Path]]:
 def test_publication_evidence_requires_matched_sealed_sdpa_panel(tmp_path: Path) -> None:
     allocation, report, paths = _evidence(tmp_path)
     loaded = ASSEMBLER._load_publication_evidence(*paths, allocation, report)
-    assert loaded[1]["summary"]["count"] == 20480
-    assert loaded[3]["ok"] is True
+    assert loaded[2]["summary"]["count"] == 20480
+    assert loaded[4]["ok"] is True
 
-    control_report = json.loads(paths[2].read_text())
+    control_report = json.loads(paths[3].read_text())
     control_report["attention_backend"] = "eager"
     body = {key: value for key, value in control_report.items() if key != "report_sha256"}
-    _write(paths[2], _sealed(body, "report_sha256"))
+    _write(paths[3], _sealed(body, "report_sha256"))
     with pytest.raises(ValueError, match="matched SDPA panel"):
         ASSEMBLER._load_publication_evidence(*paths, allocation, report)
 
 
 def test_model_card_reports_causal_and_panel_effects(tmp_path: Path) -> None:
     allocation, report, paths = _evidence(tmp_path)
-    comparison, causal, control, causal_verify, control_verify = (
+    comparison, panel_comparison, causal, control, causal_verify, control_verify = (
         ASSEMBLER._load_publication_evidence(*paths, allocation, report)
     )
     card = ASSEMBLER._model_card(
@@ -138,6 +170,7 @@ def test_model_card_reports_causal_and_panel_effects(tmp_path: Path) -> None:
             "max_token_kld_difference": 9e-13,
         },
         comparison,
+        panel_comparison,
         causal,
         control,
         causal_verify,
