@@ -115,7 +115,7 @@ def test_mutating_scripts_default_to_dry_run(tmp_path):
 
     source = tmp_path / "exl3"
     source.mkdir()
-    (source / "pyproject.toml").write_text("[build-system]\nrequires=[]\n")
+    (source / "setup.py").write_text("from setuptools import setup\nsetup()\n")
     build = run("bootstrap_sm100_exl3.py", "--source", str(source))
     assert build.returncode == 0, build.stderr
     assert json.loads(build.stdout)["dry_run"] is True

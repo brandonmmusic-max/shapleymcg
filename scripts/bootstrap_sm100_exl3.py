@@ -18,8 +18,8 @@ def main() -> int:
     parser.add_argument("--execute", action="store_true", help="actually compile/install into the active environment")
     args = parser.parse_args()
     source = args.source.resolve()
-    if not (source / "pyproject.toml").is_file():
-        raise SystemExit("EXL3 source must be an existing prepared source tree with pyproject.toml")
+    if not (source / "setup.py").is_file():
+        raise SystemExit("EXL3 v0.0.43 source must be an existing prepared source tree with setup.py")
     if args.max_jobs < 1:
         raise SystemExit("max-jobs must be positive")
     command = [sys.executable, "-m", "pip", "install", "--no-deps", "--no-build-isolation", "."]

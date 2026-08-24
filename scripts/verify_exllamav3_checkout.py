@@ -27,8 +27,11 @@ def main() -> int:
     parser.add_argument("--require-clean", action="store_true")
     args = parser.parse_args()
     source = args.source.resolve()
-    if not (source / ".git").exists() or not (source / "pyproject.toml").is_file():
-        raise SystemExit("ExLlamaV3 source must be a Git checkout with pyproject.toml")
+    # The pinned v0.0.43 commit predates the project's pyproject.toml
+    # migration and is built by setup.py.  Requiring pyproject.toml here made
+    # the exact checkout prepared by the companion script unverifiable.
+    if not (source / ".git").exists() or not (source / "setup.py").is_file():
+        raise SystemExit("ExLlamaV3 v0.0.43 source must be a Git checkout with setup.py")
     head = git(source, "rev-parse", "HEAD")
     if head != COMMIT:
         raise SystemExit(f"ExLlamaV3 checkout drift: expected {COMMIT}, observed {head}")
