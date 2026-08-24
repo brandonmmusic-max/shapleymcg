@@ -42,21 +42,35 @@ def hash_json(value: dict) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def load_logits(path: Path) -> torch.Tensor:
-    with safe_open(path, framework="pt", device="cpu") as handle:
-        return handle.get_tensor("logits").float()
+def load_logits(path: Path) -> np.ndarray:
+    with safe_open(path, framework="np") as handle:
+        return np.asarray(handle.get_tensor("logits"), dtype=np.float32)
+
+
+def token_kld_float64(teacher: np.ndarray, student: np.ndarray, chunk: int = 16) -> np.ndarray:
+    result = np.empty(teacher.shape[0], dtype=np.float64)
+    for start in range(0, len(result), chunk):
+        stop = min(start + chunk, len(result))
+        target = np.asarray(teacher[start:stop], dtype=np.float64)
+        observed = np.asarray(student[start:stop], dtype=np.float64)
+        target -= np.max(target, axis=-1, keepdims=True)
+        observed -= np.max(observed, axis=-1, keepdims=True)
+        target -= np.logaddexp.reduce(target, axis=-1, keepdims=True)
+        observed -= np.logaddexp.reduce(observed, axis=-1, keepdims=True)
+        result[start:stop] = np.sum(np.exp(target) * (target - observed), axis=-1)
+    return result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("result", type=Path)
     parser.add_argument("--teacher-root", type=Path)
-    parser.add_argument("--atol", type=float, default=2e-6)
+    parser.add_argument("--atol", type=float, default=1e-10)
     args = parser.parse_args()
 
     root = args.result.resolve()
     report = json.loads((root / "kld-report.json").read_text())
-    stored = np.load(root / "token-kld.npy").astype(np.float32, copy=False).reshape(-1)
+    stored = np.load(root / "token-kld.npy").astype(np.float64, copy=False).reshape(-1)
     teacher_root = args.teacher_root.resolve() if args.teacher_root else root / "teacher-logits"
     teacher_paths = sorted(teacher_root.glob("row-*.safetensors"))
     student_paths = sorted((root / "student-logits").glob("row-*.safetensors"))
@@ -78,6 +92,7 @@ def main() -> int:
             raise ValueError("student file inventory drifted")
 
     values: list[np.ndarray] = []
+    torch_values: list[np.ndarray] = []
     agreements = 0
     count = 0
     for teacher_path, student_path in zip(teacher_paths, student_paths, strict=True):
@@ -85,22 +100,28 @@ def main() -> int:
         student = load_logits(student_path)
         if teacher.shape != student.shape or teacher.ndim != 2:
             raise ValueError(f"logit geometry mismatch: {teacher_path.name}")
-        # torch.kl_div(input_log_probs, target_probs) evaluates
-        # target * (log(target) - input), hence KL(teacher || student).
-        per_token = F.kl_div(
-            F.log_softmax(student, dim=-1),
-            F.softmax(teacher, dim=-1),
+        per_token = token_kld_float64(teacher, student)
+        values.append(per_token)
+        # Retain the float32 PyTorch/ExLlama-style value as a secondary
+        # numerical cross-check, but do not compare its per-token rounding
+        # directly against the stored float64 producer vector.
+        teacher_torch = torch.from_numpy(teacher)
+        student_torch = torch.from_numpy(student)
+        torch_per_token = F.kl_div(
+            F.log_softmax(student_torch, dim=-1),
+            F.softmax(teacher_torch, dim=-1),
             reduction="none",
         ).sum(dim=-1)
-        values.append(per_token.numpy())
-        agreements += int(torch.eq(teacher.argmax(-1), student.argmax(-1)).sum())
+        torch_values.append(torch_per_token.numpy())
+        agreements += int(np.count_nonzero(teacher.argmax(-1) == student.argmax(-1)))
         count += int(teacher.shape[0])
 
-    independent = np.concatenate(values).astype(np.float32, copy=False)
+    independent = np.concatenate(values).astype(np.float64, copy=False)
+    torch_reference = np.concatenate(torch_values).astype(np.float32, copy=False)
     if independent.shape != stored.shape:
         raise ValueError(f"token array shape mismatch: {independent.shape} != {stored.shape}")
-    delta = np.abs(independent.astype(np.float64) - stored.astype(np.float64))
-    observed_mean = float(independent.astype(np.float64).mean())
+    delta = np.abs(independent - stored)
+    observed_mean = float(independent.mean())
     reported_mean = float(report["summary"]["mean"])
     observed_top1 = agreements / count
     reported_top1 = float(report["top1_agreement"])
@@ -112,11 +133,18 @@ def main() -> int:
             and abs(observed_top1 - reported_top1) <= 1e-12
         ),
         "direction": "KL(bf16 teacher || quantized student)",
-        "implementation": "torch.nn.functional.kl_div(log_softmax(student), softmax(teacher))",
+        "implementation": "independent NumPy float64 log-softmax and KL reduction",
+        "secondary_float32_implementation": (
+            "torch.nn.functional.kl_div(log_softmax(student), softmax(teacher))"
+        ),
         "positions": count,
         "stored_token_kld_sha256": sha256_file(root / "token-kld.npy"),
         "independent_mean": observed_mean,
         "reported_mean": reported_mean,
+        "secondary_float32_mean": float(torch_reference.astype(np.float64).mean()),
+        "secondary_float32_mean_delta": float(
+            abs(torch_reference.astype(np.float64).mean() - reported_mean)
+        ),
         "mean_absolute_delta": float(delta.mean()),
         "max_absolute_delta": float(delta.max(initial=0.0)),
         "independent_top1_agreement": observed_top1,
