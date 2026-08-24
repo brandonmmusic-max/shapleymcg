@@ -82,7 +82,11 @@ Aumann-Shapley/Fisher share. Signed scores receive one constant offset per
 expert unit so the DP sees finite non-negative values; because every candidate
 for that unit receives the same offset, within-unit ordering and the global
 optimizer's selected solution are unchanged. The receipt publishes every
-scale, offset, provisional anchor, and both allocation arms. Exact KLD
+scale, offset, provisional anchor, the shifted DP objective, its selected-unit
+offset total, the reconstructed unshifted objective, and both allocation arms.
+Every consumer revalidates the sealed ledger before allocation or causal
+installation, and the official-BTX filter must retain at least one legal
+candidate for every sealed expert unit. Exact KLD
 re-anchors—not the proxy calibration—remain the acceptance authority.
 
 ## Stage 4: pack, reconstruct and audit

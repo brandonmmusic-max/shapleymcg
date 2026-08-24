@@ -78,6 +78,14 @@ def _require_hash(value: Any, label: str) -> str:
     return value
 
 
+def _validate_allocation_document(allocation: Mapping[str, Any]) -> None:
+    if allocation.get("schema") != ALLOCATION_SCHEMA:
+        raise ValueError("allocation schema mismatch")
+    seal = allocation.get("allocation_sha256")
+    if seal != _hash_json({key: value for key, value in allocation.items() if key != "allocation_sha256"}):
+        raise ValueError("allocation seal mismatch")
+
+
 def _output(context: Mapping[str, Any]) -> Path:
     root = Path(str(context["output_dir"])).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -560,11 +568,16 @@ class QwenCodecService:
         return torch.frombuffer(raw, dtype=dtype).clone().reshape(tuple(int(x) for x in ref["shape"]))
 
     def install(self, context: Mapping[str, Any]) -> Mapping[str, Any]:
+        from ..candidates.ledger import validate_ledger
+
         candidate_root = _dependency(context, "causal_candidates")
         ledger_path = _result_path(candidate_root, "candidate_ledger_file")
         ledger = json.loads(ledger_path.read_text())
+        competitive = bool(ledger.get("competitive"))
+        validate_ledger(ledger, competitive=competitive, allow_test_backend=not competitive)
         allocation_root = _dependency(context, "allocation")
         allocation = json.loads(_result_path(allocation_root, "allocation_file").read_text())
+        _validate_allocation_document(allocation)
         layer = int(context["layer"])
         serving = allocation.get("serving_arm", {})
         selected_rows = [
@@ -670,11 +683,13 @@ class QwenAllocatorService:
         return True, None
 
     def allocate(self, context: Mapping[str, Any]) -> Mapping[str, Any]:
-        from ..candidates.ledger import allocate_validated_records
+        from ..candidates.ledger import allocate_validated_records, validate_ledger
 
         ledger_root = _dependency(context, "candidates")
         ledger_path = _result_path(ledger_root, "candidate_ledger_file")
         ledger = json.loads(ledger_path.read_text())
+        competitive = bool(ledger.get("competitive"))
+        validate_ledger(ledger, competitive=competitive, allow_test_backend=not competitive)
         records = list(ledger["candidates"])
         attribution_root = _dependency(context, "attribution")
         attribution_path = _result_path(attribution_root, "attribution_file")
@@ -722,10 +737,10 @@ class QwenAllocatorService:
                 "signed_scale": scale,
                 "nonnegative_unit_offset": offset,
                 "provisional_unshifted_damage": raw[str(anchor["candidate_id"])],
+                "provisional_shifted_damage": raw[str(anchor["candidate_id"])] + offset,
             })
         budget_value = self.config["byte_budget"] if "byte_budget" in self.config else self.config["exact_payload_byte_budget"]
         budget = int(budget_value)
-        competitive = bool(ledger.get("competitive"))
         allocation_options = {
             "byte_budget": budget,
             "quantum": int(self.config.get("allocation_quantum", 1)),
@@ -745,6 +760,13 @@ class QwenAllocatorService:
             (legal if ok else rejected).append(record if ok else {
                 "candidate_id": record["candidate_id"], "unit_id": record["unit_id"], "reason": reason,
             })
+        legal_units = {str(row["unit_id"]) for row in legal}
+        missing_legal_units = sorted(set(by_unit) - legal_units)
+        if missing_legal_units:
+            raise ValueError(
+                "official BTX filter leaves expert units without a legal candidate: "
+                + ", ".join(missing_legal_units)
+            )
         legal_overrides = {str(row["candidate_id"]): damage_overrides[str(row["candidate_id"])] for row in legal}
         serving = allocate_validated_records(
             legal,
@@ -752,7 +774,9 @@ class QwenAllocatorService:
             **allocation_options,
         )
 
-        def arm(value: Any) -> dict[str, Any]:
+        offset_by_unit = {str(row["unit_id"]): float(row["nonnegative_unit_offset"]) for row in calibration_rows}
+
+        def arm(value: Any, *, shifted: bool) -> dict[str, Any]:
             allocation = value.allocation
             choices = [{
                 "unit_id": row.unit_id,
@@ -761,12 +785,15 @@ class QwenAllocatorService:
                 "predicted_damage": row.predicted_damage,
                 "candidate_record_sha256": row.metadata["record_sha256"],
             } for row in allocation.choices]
+            total_offset = sum(offset_by_unit[row["unit_id"]] for row in choices) if shifted else 0.0
             return {
                 "choices": choices,
                 "variable_payload_bytes": allocation.variable_payload_bytes,
                 "fixed_layer_shared_bytes": allocation.fixed_layer_shared_bytes,
                 "stored_bytes": allocation.stored_bytes,
                 "predicted_damage": allocation.predicted_damage,
+                "selected_unit_offset_total": total_offset,
+                "unshifted_predicted_damage": allocation.predicted_damage - total_offset,
                 "selected_cost": dict(value.selected_cost),
             }
 
@@ -776,9 +803,9 @@ class QwenAllocatorService:
             "attribution_file_sha256": sha256_file(attribution_path),
             "attribution_sha256": seal,
             "byte_budget": budget,
-            "proxy_control_arm": arm(proxy_control),
-            "research_arm": arm(research),
-            "serving_arm": arm(serving),
+            "proxy_control_arm": arm(proxy_control, shifted=False),
+            "research_arm": arm(research, shifted=True),
+            "serving_arm": arm(serving, shifted=True),
             "shapley_damage_calibration": {
                 "method": "signed-provisional-ratio-with-unit-constant-offset-v1",
                 "provisional_bit_triplet": list(provisional),
@@ -980,6 +1007,7 @@ class QwenCheckpointService:
         installed = list(context["installed_layer_attempts"])
         allocation_root = _dependency(context, "allocation")
         allocation = json.loads(_result_path(allocation_root, "allocation_file").read_text())
+        _validate_allocation_document(allocation)
         selected_cost = allocation.get("serving_arm", {}).get("selected_cost")
         if not isinstance(selected_cost, Mapping):
             raise ValueError("checkpoint emission requires serving selected_cost")

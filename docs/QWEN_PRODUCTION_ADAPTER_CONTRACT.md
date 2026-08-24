@@ -154,8 +154,10 @@ substitute for model/codec output.
   constant makes the optimization scores non-negative without changing any
   within-unit ordering. Preserve the uncalibrated proxy allocation as a
   control, then run exact global byte allocation and emit choice IDs, exact
-  payload bytes, calibrated predicted damage, offsets, budget slack, and all
-  source hashes.
+  payload bytes, shifted and reconstructed-unshifted predicted damage, offsets,
+  budget slack, and all source hashes. Revalidate the complete sealed ledger at
+  each consumer, and reject an official-BTX arm before DP if any sealed expert
+  unit lacks a legal serving candidate.
 
 #### Native attribution implementation
 

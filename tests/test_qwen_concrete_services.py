@@ -18,6 +18,12 @@ from quant_pipeline.campaign.runner import CampaignDefinition, _build_stages
 from quant_pipeline.core.artifacts import canonical_json, sha256_bytes, sha256_file, write_json
 
 
+def _sealed_allocation(body):
+    document = {"schema": "quant-pipeline.qwen-dual-arm-allocation.v1", **body}
+    document["allocation_sha256"] = sha256_bytes(canonical_json(document))
+    return document
+
+
 def _runtime_module(tmp_path):
     module = tmp_path / "sealed_student_runtime.py"
     module.write_text(
@@ -148,7 +154,7 @@ def test_checkpoint_composition_uses_reconciled_total_and_nested_official_audit(
 
     allocation_root = tmp_path / "allocation"
     allocation_root.mkdir()
-    allocation = {"serving_arm": {"selected_cost": {"schema": "fixture"}}}
+    allocation = _sealed_allocation({"serving_arm": {"selected_cost": {"schema": "fixture"}}})
     write_json(allocation_root / "allocation.json", allocation)
     write_json(
         allocation_root / "stage-manifest.json",
@@ -203,6 +209,138 @@ def test_allocator_composition_persists_validated_selected_cost(tmp_path, monkey
         "bit_triplet": [3, 3, 3],
         "predicted_damage": 0.5,
     }
+    record_k4 = dict(record) | {
+        "candidate_id": "L0.E0.g4u4d4",
+        "record_sha256": "4" * 64,
+        "bit_triplet": [4, 4, 4],
+        "predicted_damage": 1.0,
+    }
+    write_json(candidate_root / "candidate-ledger.json", {
+        "ledger_sha256": "5" * 64,
+        "competitive": False,
+        "candidates": [record, record_k4],
+    })
+    write_json(candidate_root / "stage-manifest.json", {
+        "provider_result": {"candidate_ledger_file": "candidate-ledger.json"}
+    })
+    attribution_root = tmp_path / "attribution"
+    attribution_root.mkdir()
+    attribution = {
+        "schema": "quant-pipeline.qwen-attribution.v1",
+        "candidate_ledger_sha256": sha256_file(candidate_root / "candidate-ledger.json"),
+        "layers": [{"layer_index": 0, "expert_direct": [-0.25]}],
+    }
+    attribution["attribution_sha256"] = sha256_bytes(canonical_json(attribution))
+    write_json(attribution_root / "attribution.json", attribution)
+    write_json(attribution_root / "stage-manifest.json", {
+        "provider_result": {"attribution_file": "attribution.json"}
+    })
+    selected_cost = {
+        "schema": "quant-pipeline.selected-allocation-cost.v1",
+        "allocated_payload_bytes": 13,
+        "selected_layer_costs": [{"layer": 0, "allocated_payload_bytes": 13}],
+        "allocation_cost_sha256": "5" * 64,
+    }
+    calls = []
+
+    def allocate(records, **options):
+        calls.append((records, options))
+        overrides = options.get("damage_overrides")
+        selected = min(
+            records,
+            key=lambda row: (
+                overrides[str(row["candidate_id"])] if overrides is not None
+                else float(row["predicted_damage"])
+            ),
+        )
+        choice = SimpleNamespace(
+            unit_id="L0.E0",
+            choice_id=selected["candidate_id"],
+            stored_bytes=11,
+            predicted_damage=(
+                overrides[str(selected["candidate_id"])] if overrides is not None
+                else float(selected["predicted_damage"])
+            ),
+            metadata=selected,
+        )
+        allocation = SimpleNamespace(
+            choices=(choice,),
+            variable_payload_bytes=11,
+            fixed_layer_shared_bytes=2,
+            stored_bytes=13,
+            predicted_damage=choice.predicted_damage,
+        )
+        return SimpleNamespace(allocation=allocation, selected_cost=selected_cost)
+
+    monkeypatch.setattr(ledger_module, "allocate_validated_records", allocate)
+    monkeypatch.setattr(ledger_module, "validate_ledger", lambda *_args, **_kwargs: None)
+    output = tmp_path / "allocation-output"
+    QwenAllocatorService({
+        "exact_payload_byte_budget": 13,
+        "attribution_provisional_bit_triplet": [3, 3, 3],
+        "require_fused_btx": False,
+    }).allocate({
+        "output_dir": str(output),
+        "dependencies": {
+            "candidates": str(candidate_root),
+            "attribution": str(attribution_root),
+        },
+    })
+    document = json.loads((output / "allocation.json").read_text())
+    assert len(calls) == 3
+    assert "damage_overrides" not in calls[0][1]
+    assert calls[1][1]["damage_overrides"] == {
+        "L0.E0.g3u3d3": pytest.approx(0.25),
+        "L0.E0.g4u4d4": pytest.approx(0.0),
+    }
+    assert document["attribution_file_sha256"] == sha256_file(attribution_root / "attribution.json")
+    assert document["proxy_control_arm"]["selected_cost"] == selected_cost
+    assert document["research_arm"]["selected_cost"] == selected_cost
+    assert document["serving_arm"]["selected_cost"] == selected_cost
+    row = document["shapley_damage_calibration"]["unit_rows"][0]
+    assert row["provisional_unshifted_damage"] == pytest.approx(row["expert_direct"])
+    assert row["provisional_shifted_damage"] == pytest.approx(
+        row["expert_direct"] + row["nonnegative_unit_offset"]
+    )
+    assert document["proxy_control_arm"]["choices"][0]["choice_id"] == "L0.E0.g3u3d3"
+    assert document["research_arm"]["choices"][0]["choice_id"] == "L0.E0.g4u4d4"
+    assert document["research_arm"]["selected_unit_offset_total"] == pytest.approx(0.5)
+    assert document["research_arm"]["unshifted_predicted_damage"] == pytest.approx(-0.5)
+
+
+def test_allocator_revalidates_loaded_ledger_before_consuming_it(tmp_path, monkeypatch):
+    from quant_pipeline.candidates import ledger as ledger_module
+
+    candidate_root = tmp_path / "candidates"
+    candidate_root.mkdir()
+    write_json(candidate_root / "candidate-ledger.json", {"competitive": False, "candidates": []})
+    write_json(candidate_root / "stage-manifest.json", {
+        "provider_result": {"candidate_ledger_file": "candidate-ledger.json"}
+    })
+    monkeypatch.setattr(
+        ledger_module,
+        "validate_ledger",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("tampered ledger")),
+    )
+    with pytest.raises(ValueError, match="tampered ledger"):
+        QwenAllocatorService({"exact_payload_byte_budget": 1}).allocate({
+            "output_dir": str(tmp_path / "output"),
+            "dependencies": {"candidates": str(candidate_root)},
+        })
+
+
+def test_serving_filter_rejects_missing_expert_unit_before_dp(tmp_path, monkeypatch):
+    from quant_pipeline.candidates import ledger as ledger_module
+
+    candidate_root = tmp_path / "candidates"
+    candidate_root.mkdir()
+    record = {
+        "unit_id": "L0.E0",
+        "candidate_id": "L0.E0.g4u4d4",
+        "record_sha256": "3" * 64,
+        "bit_triplet": [4, 4, 4],
+        "predicted_damage": 0.5,
+    }
     write_json(candidate_root / "candidate-ledger.json", {
         "ledger_sha256": "4" * 64,
         "competitive": False,
@@ -223,52 +361,32 @@ def test_allocator_composition_persists_validated_selected_cost(tmp_path, monkey
     write_json(attribution_root / "stage-manifest.json", {
         "provider_result": {"attribution_file": "attribution.json"}
     })
-    selected_cost = {
-        "schema": "quant-pipeline.selected-allocation-cost.v1",
-        "allocated_payload_bytes": 13,
-        "selected_layer_costs": [{"layer": 0, "allocated_payload_bytes": 13}],
-        "allocation_cost_sha256": "5" * 64,
-    }
-    calls = []
+    monkeypatch.setattr(ledger_module, "validate_ledger", lambda *_args, **_kwargs: None)
 
-    def allocate(records, **options):
-        calls.append((records, options))
+    def allocate(_records, **_options):
         choice = SimpleNamespace(
-            unit_id="L0.E0",
-            choice_id="L0.E0.g3u3d3",
-            stored_bytes=11,
-            predicted_damage=0.25,
-            metadata=record,
+            unit_id="L0.E0", choice_id=record["candidate_id"], stored_bytes=1,
+            predicted_damage=0.25, metadata=record,
         )
         allocation = SimpleNamespace(
-            choices=(choice,),
-            variable_payload_bytes=11,
-            fixed_layer_shared_bytes=2,
-            stored_bytes=13,
-            predicted_damage=0.25,
+            choices=(choice,), variable_payload_bytes=1, fixed_layer_shared_bytes=0,
+            stored_bytes=1, predicted_damage=0.25,
         )
-        return SimpleNamespace(allocation=allocation, selected_cost=selected_cost)
+        return SimpleNamespace(allocation=allocation, selected_cost={})
 
     monkeypatch.setattr(ledger_module, "allocate_validated_records", allocate)
-    output = tmp_path / "allocation-output"
-    QwenAllocatorService({
-        "exact_payload_byte_budget": 13,
-        "attribution_provisional_bit_triplet": [3, 3, 3],
-    }).allocate({
-        "output_dir": str(output),
-        "dependencies": {
-            "candidates": str(candidate_root),
-            "attribution": str(attribution_root),
-        },
-    })
-    document = json.loads((output / "allocation.json").read_text())
-    assert len(calls) == 3
-    assert "damage_overrides" not in calls[0][1]
-    assert calls[1][1]["damage_overrides"] == {"L0.E0.g3u3d3": 0.25}
-    assert document["attribution_file_sha256"] == sha256_file(attribution_root / "attribution.json")
-    assert document["proxy_control_arm"]["selected_cost"] == selected_cost
-    assert document["research_arm"]["selected_cost"] == selected_cost
-    assert document["serving_arm"]["selected_cost"] == selected_cost
+    with pytest.raises(ValueError, match="without a legal candidate: L0.E0"):
+        QwenAllocatorService({
+            "exact_payload_byte_budget": 1,
+            "attribution_provisional_bit_triplet": [4, 4, 4],
+            "require_fused_btx": True,
+        }).allocate({
+            "output_dir": str(tmp_path / "output"),
+            "dependencies": {
+                "candidates": str(candidate_root),
+                "attribution": str(attribution_root),
+            },
+        })
 
 
 def test_codec_install_consumes_selected_layer_cost_row(tmp_path, monkeypatch):
@@ -305,7 +423,7 @@ def test_codec_install_consumes_selected_layer_cost_row(tmp_path, monkeypatch):
     }
     allocation_root = tmp_path / "allocation"
     allocation_root.mkdir()
-    write_json(allocation_root / "allocation.json", {
+    write_json(allocation_root / "allocation.json", _sealed_allocation({
         "serving_arm": {
             "choices": [{
                 "unit_id": "L0.E0",
@@ -314,7 +432,7 @@ def test_codec_install_consumes_selected_layer_cost_row(tmp_path, monkeypatch):
             }],
             "selected_cost": {"selected_layer_costs": [layer_cost]},
         }
-    })
+    }))
     write_json(allocation_root / "stage-manifest.json", {
         "provider_result": {"allocation_file": "allocation.json"}
     })
@@ -335,6 +453,8 @@ def test_codec_install_consumes_selected_layer_cost_row(tmp_path, monkeypatch):
         }}
 
     monkeypatch.setattr(qwen_services, "install_layer_payloads", install)
+    from quant_pipeline.candidates import ledger as ledger_module
+    monkeypatch.setattr(ledger_module, "validate_ledger", lambda *_args, **_kwargs: None)
     codec = SimpleNamespace(identity={"codec": "fixture"})
     service = QwenCodecService({}, codec)
     monkeypatch.setattr(service, "_load_ref", lambda *_args: np.zeros(1, dtype=np.float16))
@@ -352,3 +472,32 @@ def test_codec_install_consumes_selected_layer_cost_row(tmp_path, monkeypatch):
     })
     assert observed["expected_allocated_payload_bytes"] == 13
     assert result["installed_checkpoint_sha256"] == "9" * 64
+
+
+def test_codec_install_rejects_allocation_seal_drift(tmp_path, monkeypatch):
+    from quant_pipeline.candidates import ledger as ledger_module
+
+    candidate_root = tmp_path / "causal-candidates"
+    candidate_root.mkdir()
+    write_json(candidate_root / "candidate-ledger.json", {"competitive": False, "candidates": []})
+    write_json(candidate_root / "stage-manifest.json", {
+        "provider_result": {"candidate_ledger_file": "candidate-ledger.json"}
+    })
+    allocation_root = tmp_path / "allocation"
+    allocation_root.mkdir()
+    allocation = _sealed_allocation({"serving_arm": {"choices": []}})
+    allocation["serving_arm"]["choices"].append({"unit_id": "L0.E0"})
+    write_json(allocation_root / "allocation.json", allocation)
+    write_json(allocation_root / "stage-manifest.json", {
+        "provider_result": {"allocation_file": "allocation.json"}
+    })
+    monkeypatch.setattr(ledger_module, "validate_ledger", lambda *_args, **_kwargs: None)
+    with pytest.raises(ValueError, match="allocation seal mismatch"):
+        QwenCodecService({}, SimpleNamespace(identity={})).install({
+            "output_dir": str(tmp_path / "output"),
+            "layer": 0,
+            "dependencies": {
+                "causal_candidates": str(candidate_root),
+                "allocation": str(allocation_root),
+            },
+        })
