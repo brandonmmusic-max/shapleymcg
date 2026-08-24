@@ -19,7 +19,6 @@ from typing import Any
 import numpy as np
 
 from quant_pipeline.calibration.qwen_capture import qwen_moe_layers
-from quant_pipeline.campaign.qwen_attribution import load_teacher_logits
 from quant_pipeline.core.artifacts import (
     atomic_write,
     canonical_json,
@@ -35,6 +34,16 @@ from quant_pipeline.scoring.kld import summarize
 
 MODEL_REVISION = "1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9"
 PROJECTIONS = ("gate_proj", "up_proj", "down_proj")
+
+
+def load_teacher_logits(path: Path) -> np.ndarray:
+    """Load the canonical LM logits without depending on campaign internals."""
+    from safetensors import safe_open
+
+    with safe_open(path, framework="np") as handle:
+        if "logits" not in handle.keys():
+            raise ValueError("teacher safetensors must contain a logits tensor")
+        return np.asarray(handle.get_tensor("logits"))
 
 
 def _hash_json(value: Any) -> str:
