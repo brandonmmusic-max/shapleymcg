@@ -174,6 +174,11 @@ def main() -> int:
             # Gram.  Damping belongs exclusively to codec-level sigma_reg;
             # applying OAS here would change both the experiment and result.
             covariance = fitted.dense_hessian("combined", 2, regularized=False)
+            damage_diagonal = torch.as_tensor(
+                np.diag(covariance).copy(),
+                device=args.device,
+                dtype=torch.float32,
+            )
             requests.append({
                 "tensor_id": codec._parse_unit(unit_id, tuple(source_weight.shape)),
                 "weight_hf": source_weight,
@@ -189,7 +194,7 @@ def main() -> int:
                     "fit_manifest_sha256": plan["fit_manifest_sha256"],
                 },
             })
-            request_metadata.append((key, expert, projection, source_weight, fitted, suh, svh))
+            request_metadata.append((key, expert, projection, suh, svh, damage_diagonal))
         # R10's native group encoder prepares/factorizes each matrix once and
         # locksteps all equal-bit LDLQ walks.  This is the intended high-GPU-
         # occupancy path and avoids hundreds of tiny serial codec launches.
@@ -204,19 +209,19 @@ def main() -> int:
                     "elapsed_seconds": time.monotonic() - bit_started,
                 }, sort_keys=True), flush=True)
         for metadata, encoded in zip(request_metadata, encoded_group, strict=True):
-            key, expert, projection, source_weight, fitted, suh, svh = metadata
+            key, expert, projection, suh, svh, damage_diagonal = metadata
             candidate = encoded[bit]
-            reconstructed = candidate.reconstructed_kn.T.detach().to(
-                dtype=torch.bfloat16, device="cpu"
-            ).contiguous()
+            reconstructed_hf = candidate.reconstructed_kn.T.detach().to(torch.bfloat16)
+            reconstructed = reconstructed_hf.to(device="cpu").contiguous()
             packed = candidate.trellis.detach().cpu().contiguous()
-            residual = source_weight.float().to(args.device) - reconstructed.float().to(args.device)
-            diagonal = torch.as_tensor(
-                np.diag(fitted.dense_hessian("combined", 2, regularized=False)),
-                device=args.device,
-                dtype=torch.float32,
+            # The source matrix already lives on the selected GPU as the
+            # normalization input.  Score the exact stored-BF16 replay there;
+            # avoid a BF16 CPU round trip and a second dense-Hessian rebuild.
+            source_hf = fit.matrices[key].source.weight_kn.T
+            residual = source_hf.float() - reconstructed_hf.float()
+            damage = float(
+                (residual.square() * damage_diagonal.unsqueeze(0)).sum().item()
             )
-            damage = float((residual.square() * diagonal.unsqueeze(0)).sum().item())
             prefix = f"K{bit}.E{expert:03d}.{projection}"
             tensors[prefix + ".reconstruction_hf"] = reconstructed
             tensors[prefix + ".packed_trellis"] = packed
@@ -241,7 +246,7 @@ def main() -> int:
                 "stored_bf16_reconstruction_sha256": tensor_sha256(reconstructed),
                 "gss_receipt_sha256": receipts[key]["receipt_sha256"],
             })
-            del residual, diagonal
+            del residual, reconstructed_hf, damage_diagonal
         bit_receipts[str(bit)] = {
             "receipt_sha256": _hash_json(receipts),
             "matrix_count": len(receipts),
