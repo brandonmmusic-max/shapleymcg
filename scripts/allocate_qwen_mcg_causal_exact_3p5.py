@@ -82,7 +82,9 @@ def _direct_scores(attribution: dict[str, Any]) -> dict[tuple[int, int], float]:
     direct: dict[tuple[int, int], float] = {}
     for layer_row in attribution.get("layers", ()):
         layer = int(layer_row["layer_index"])
-        values = list(layer_row["expert_direct"])
+        if "expert_direct_reconciled" not in layer_row:
+            raise ValueError("attribution lacks completeness-reconciled expert scores")
+        values = list(layer_row["expert_direct_reconciled"])
         if len(values) != 128:
             raise ValueError(f"layer {layer} attribution does not contain 128 experts")
         for expert, value in enumerate(values):

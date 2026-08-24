@@ -65,6 +65,44 @@ class Reconciliation:
     method: str
 
 
+def reconcile_signed_completeness(
+    raw: Sequence[float],
+    measured_total: float,
+    *,
+    minimum_relative_total: float = 1e-12,
+) -> Reconciliation:
+    """Rescale signed directional shares to an independently measured total.
+
+    The scale is explicit and preserves every signed ratio.  A nearly
+    cancelling raw total fails closed because proportional reconciliation
+    would otherwise amplify numerical noise into arbitrary attribution.
+    """
+    values = np.asarray(raw, dtype=np.float64)
+    if values.ndim != 1 or not len(values) or not np.isfinite(values).all():
+        raise ValueError("signed completeness reconciliation requires finite 1D shares")
+    measured = float(measured_total)
+    if not np.isfinite(measured):
+        raise ValueError("signed completeness reconciliation requires a finite measured total")
+    raw_total = float(np.sum(values))
+    magnitude = float(np.sum(np.abs(values)))
+    if magnitude == 0.0 or abs(raw_total) <= minimum_relative_total * magnitude:
+        raise ValueError("signed completeness reconciliation raw total is numerically singular")
+    scale = measured / raw_total
+    reconciled = values * scale
+    # Put the final floating-point ulp on the largest share so serialized
+    # values close exactly under the same summation order.
+    index = int(np.argmax(np.abs(reconciled)))
+    reconciled[index] += measured - float(np.sum(reconciled))
+    return Reconciliation(
+        raw=values,
+        reconciled=reconciled,
+        measured_total=measured,
+        raw_total=raw_total,
+        closure_residual=measured - raw_total,
+        method="signed-proportional-completeness",
+    )
+
+
 def reconcile_explicit_remainder(raw: Sequence[float], measured_total: float) -> Reconciliation:
     """Keep proxy values untouched and expose non-closure as its own component."""
     values = np.asarray(raw, dtype=np.float64)

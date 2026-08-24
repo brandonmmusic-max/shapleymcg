@@ -8,6 +8,7 @@ from safetensors.numpy import save_file
 from transformers import Qwen3MoeConfig, Qwen3MoeForCausalLM
 
 from quant_pipeline.campaign.qwen_attribution import (
+    build_hierarchical_attribution_document,
     load_teacher_logits,
     load_provisional_decoded_weights,
     measure_native_causal_attribution,
@@ -97,6 +98,16 @@ def test_tiny_real_qwen_native_path_gradient_fisher_closure_and_tamper(tmp_path)
     )
     assert split["closed_total"] == pytest.approx(float(arrays["measured_layer_damage"][0]), abs=1e-18)
     assert split["routing_state_shift"] == pytest.approx(0.0, abs=1e-18)
+    document = build_hierarchical_attribution_document(arrays, "4" * 64)
+    assert document["sum_reconciled_layer_damage"] == pytest.approx(
+        arrays["measured_end_to_end_delta"].item(), abs=1e-15
+    )
+    assert document["sum_reconciled_expert_damage"] == pytest.approx(
+        arrays["measured_end_to_end_delta"].item(), abs=1e-15
+    )
+    assert sum(document["layers"][0]["expert_direct_reconciled"]) == pytest.approx(
+        document["layers"][0]["reconciled_layer_damage"], abs=1e-15
+    )
 
     path = write_attribution_inputs(
         tmp_path / "attribution-inputs.npz",

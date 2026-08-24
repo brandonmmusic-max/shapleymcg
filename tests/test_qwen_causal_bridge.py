@@ -56,7 +56,7 @@ def test_shapley_fisher_bridge_preserves_exact_rate_and_payload_budget():
         "layers": [
             {
                 "layer_index": layer,
-                "expert_direct": [float(1 + ((layer + expert) % 13)) for expert in range(128)],
+                "expert_direct_reconciled": [float(1 + ((layer + expert) % 13)) for expert in range(128)],
             }
             for layer in range(48)
         ],

@@ -29,7 +29,11 @@ from ..calibration.qwen_capture import qwen_moe_layers
 from ..candidates.payload_store import ExactPayloadStore
 from ..core.artifacts import canonical_json, sha256_bytes, sha256_file, write_json
 from ..evaluation.kld_window import verify_kld_window
-from ..scoring.attribution import aumann_shapley
+from ..scoring.attribution import (
+    aumann_shapley,
+    reconcile_signed_completeness,
+    split_layer_damage,
+)
 
 
 PROVISIONAL_SCHEMA = "quant-pipeline.qwen-provisional-decoded-deltas.v1"
@@ -494,6 +498,71 @@ def measure_native_causal_attribution(
     if any(not np.isfinite(value).all() for value in values.values()):
         raise RuntimeError("native causal attribution produced non-finite evidence")
     return values
+
+
+def build_hierarchical_attribution_document(
+    arrays: Mapping[str, np.ndarray],
+    candidate_inventory_sha256: str,
+) -> dict[str, Any]:
+    """Close raw path/Fisher evidence hierarchically to measured endpoint KL."""
+    inventory_sha256 = _require_hash(candidate_inventory_sha256, "candidate inventory")
+    measured = float(arrays["measured_end_to_end_delta"][0])
+    raw_layers = np.asarray(arrays["measured_layer_damage"], dtype=np.float64)
+    layer_accounting = reconcile_signed_completeness(raw_layers, measured)
+    layers = []
+    for index, layer in enumerate(arrays["layer_indices"]):
+        split = split_layer_damage(
+            float(raw_layers[index]),
+            arrays["projected_expert_residuals"][index],
+            projected_routing_residual=arrays["projected_routing_residuals"][index],
+        )
+        expert_accounting = reconcile_signed_completeness(
+            split["expert_direct"],
+            float(layer_accounting.reconciled[index]),
+        )
+        layers.append({
+            "layer_index": int(layer),
+            "aumann_shapley_raw": float(raw_layers[index]),
+            "reconciled_layer_damage": float(layer_accounting.reconciled[index]),
+            "layer_completeness_scale": (
+                float(layer_accounting.reconciled[index]) / float(raw_layers[index])
+                if float(raw_layers[index]) != 0.0 else None
+            ),
+            "expert_direct_raw": split["expert_direct"],
+            "expert_direct_reconciled": expert_accounting.reconciled.tolist(),
+            "expert_completeness_scale": (
+                expert_accounting.measured_total / expert_accounting.raw_total
+            ),
+            "raw_expert_total": expert_accounting.raw_total,
+            "reconciled_expert_total": float(np.sum(expert_accounting.reconciled)),
+            "routing_state_shift_raw": split["routing_state_shift"],
+            "within_layer_unresolved_remainder_raw": split["unresolved_nonlinear_remainder"],
+            "raw_joint_fisher_total": split["raw_total"],
+        })
+    reconciled_layer_total = float(sum(row["reconciled_layer_damage"] for row in layers))
+    reconciled_expert_total = float(sum(row["reconciled_expert_total"] for row in layers))
+    body = {
+        "schema": "quant-pipeline.qwen-hf-mcg-attribution.v3",
+        "candidate_inventory_sha256": inventory_sha256,
+        "path_nodes": int(len(arrays["path_nodes"])),
+        "fisher_rank": int(arrays["projected_expert_residuals"].shape[-1]),
+        "source_kld": float(arrays["source_kld"][0]),
+        "candidate_kld": float(arrays["candidate_kld"][0]),
+        "measured_end_to_end_delta": measured,
+        "sum_raw_aumann_shapley_layer_damage": layer_accounting.raw_total,
+        "raw_path_quadrature_and_nonlinear_remainder": layer_accounting.closure_residual,
+        "global_layer_completeness_scale": measured / layer_accounting.raw_total,
+        "sum_reconciled_layer_damage": reconciled_layer_total,
+        "sum_reconciled_expert_damage": reconciled_expert_total,
+        "closure_policy": "signed-proportional-two-level-completeness-v1",
+        "raw_evidence_is_preserved": True,
+        "layers": layers,
+    }
+    tolerance = max(1e-15, abs(measured) * 1e-12)
+    if abs(reconciled_layer_total - measured) > tolerance or abs(reconciled_expert_total - measured) > tolerance:
+        raise RuntimeError("hierarchical attribution did not close to measured endpoint KLD")
+    body["attribution_sha256"] = _hash_json(body)
+    return body
 
 
 def write_attribution_inputs(

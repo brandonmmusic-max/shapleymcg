@@ -20,9 +20,8 @@ import subprocess
 import time
 from typing import Any
 
-import numpy as np
-
 from quant_pipeline.campaign.qwen_attribution import (
+    build_hierarchical_attribution_document,
     load_teacher_logits,
     measure_native_causal_attribution,
     verify_attribution_inputs,
@@ -37,7 +36,6 @@ from quant_pipeline.core.artifacts import (
 )
 from quant_pipeline.evaluation.kld_window import verify_kld_window
 from quant_pipeline.normalization.artifact_v31 import tensor_sha256
-from quant_pipeline.scoring.attribution import split_layer_damage
 
 
 MODEL_REVISION = "1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9"
@@ -231,40 +229,6 @@ def _load_uniform_k4(
     return decoded
 
 
-def _attribution_document(arrays: dict[str, np.ndarray], inventory_sha256: str) -> dict[str, Any]:
-    layers = []
-    for index, layer in enumerate(arrays["layer_indices"]):
-        split = split_layer_damage(
-            float(arrays["measured_layer_damage"][index]),
-            arrays["projected_expert_residuals"][index],
-            projected_routing_residual=arrays["projected_routing_residuals"][index],
-        )
-        layers.append({
-            "layer_index": int(layer),
-            "aumann_shapley": float(arrays["measured_layer_damage"][index]),
-            **split,
-        })
-    measured = float(arrays["measured_end_to_end_delta"][0])
-    layer_total = float(np.sum(arrays["measured_layer_damage"]))
-    body = {
-        "schema": "quant-pipeline.qwen-hf-mcg-attribution.v2",
-        "candidate_inventory_sha256": inventory_sha256,
-        "path_nodes": int(len(arrays["path_nodes"])),
-        "fisher_rank": int(arrays["projected_expert_residuals"].shape[-1]),
-        "source_kld": float(arrays["source_kld"][0]),
-        "candidate_kld": float(arrays["candidate_kld"][0]),
-        "measured_end_to_end_delta": measured,
-        "sum_measured_layer_damage": layer_total,
-        "unresolved_path_quadrature_and_nonlinear_remainder": measured - layer_total,
-        "closed_end_to_end_delta": measured,
-        "sum_closed_damage": float(sum(row["closed_total"] for row in layers)),
-        "remainder_policy": "explicit-unresolved-nonlinear-remainder",
-        "layers": layers,
-    }
-    body["attribution_sha256"] = _hash_json(body)
-    return body
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-model", type=Path, required=True)
@@ -365,14 +329,14 @@ def main() -> int:
         },
     )
     verify_attribution_inputs(attribution_inputs)
-    attribution = _attribution_document(arrays, inventory["inventory_sha256"])
+    attribution = build_hierarchical_attribution_document(arrays, inventory["inventory_sha256"])
     write_json(output / "attribution.json", attribution)
     print(json.dumps({
         "ok": True,
         "attribution_sha256": attribution["attribution_sha256"],
         "candidate_kld": attribution["candidate_kld"],
-        "sum_measured_layer_damage": attribution["sum_measured_layer_damage"],
-        "path_remainder": attribution["unresolved_path_quadrature_and_nonlinear_remainder"],
+        "sum_reconciled_layer_damage": attribution["sum_reconciled_layer_damage"],
+        "raw_path_remainder": attribution["raw_path_quadrature_and_nonlinear_remainder"],
     }, sort_keys=True), flush=True)
     return 0
 
