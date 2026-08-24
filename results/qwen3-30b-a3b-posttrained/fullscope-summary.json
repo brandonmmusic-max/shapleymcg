@@ -1,0 +1,41 @@
+{
+  "schema": "quant-pipeline.qwen-fullscope-github-summary.v1",
+  "source_revision": "4c446470ba0aec43e22ac1128f9ffd915f338ba3",
+  "turboderp_k4_revision": "0b83e92c6d3b5a868ecd5a5fbb3bcc1920e388ef",
+  "panel_sha256": "f67b22af3930184864d12576796807b29552bda3f55dcaa7d6af1d8b262ef9fb",
+  "allocation_sha256": "83014a38731377e205c17ebffdc1f1a558a4806a98030b395eaab587eadabb4a",
+  "exact_3p5": {
+    "ours_mean_kld": 0.046834114392727964,
+    "ours_top1_agreement": 0.916259765625,
+    "ours_report_sha256": "80ced3aa9315f847e9ca3f0728b986c530c75eca988f9fdcc6de193947375626",
+    "turboderp_mean_kld": 0.030274917976982833,
+    "turboderp_top1_agreement": 0.93447265625,
+    "turboderp_report_sha256": "bfe8c6bc0f2dc176a496712802e5335f4ba5b898747c3380695f64a19760bcbc",
+    "ours_kld_increase_vs_turboderp": 0.5469609010447071
+  },
+  "uniform_k4": {
+    "ours_mean_kld": 0.03776677825098351,
+    "ours_top1_agreement": 0.924755859375,
+    "ours_report_sha256": "2294d55d46ec8f7723fbea7e7f9e072c8aa5f4d5c24911b874af767dd219c337",
+    "turboderp_mean_kld": 0.02137210911467856,
+    "turboderp_top1_agreement": 0.94345703125,
+    "turboderp_report_sha256": "e30bc861d8ef56beee06d9a5ae3bb92601e3048fd8d1b5e90318701e23afb7f3",
+    "ours_kld_increase_vs_turboderp": 0.7671058129234867
+  },
+  "attention_ablation": {
+    "exact_3p5_bf16_attention_mean_kld": 0.04112263218133531,
+    "exact_3p5_ours_k4_attention_mean_kld": 0.046834114392727964,
+    "exact_3p5_kld_increase": 0.13888902311036835,
+    "uniform_k4_bf16_attention_mean_kld": 0.030848146342326514,
+    "uniform_k4_ours_k4_attention_mean_kld": 0.03776677825098351,
+    "uniform_k4_kld_increase": 0.22428031272543578
+  },
+  "allocation_control": {
+    "selected_mean_kld": 0.04112263218133531,
+    "five_seed_blind_mean_kld": 0.06302444048293131,
+    "selected_kld_reduction_vs_blind_mean": 0.34751293520055276,
+    "blind_seeds_beating_selected": 0
+  },
+  "upstream_summary_sha256": "3ea7ccd00d252a01ae9f7362286e2d9a31156d09d9b3058c08ef619ed59d7bf9",
+  "publication_manifest_sha256": "d8cf343c1712923ddebdb239ab8dcbd8913c23abd9d9fa8b40e921e1fc06a8d1"
+}

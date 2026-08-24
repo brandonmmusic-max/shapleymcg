@@ -3,6 +3,21 @@
 Auditable foundations for a calibration, attribution, allocation, encoding and
 validation pipeline for low-bit dense and MoE language models.
 
+## Post-trained Qwen/TurboDerp matched comparison
+
+The same-parent, same-panel full-scope experiment is complete. At exactly 3.5
+logical bits per routed-expert weight, ShapleyMCG's selected allocation reduced
+KLD by 34.7513% versus five score-blind allocations, but its MCG-based encoder
+did not beat TurboDerp's EXL3 trellis encoder. Adding ShapleyMCG K4 attention
+increased KLD from `0.04112263218133531` to `0.046834114392727964`; the matched
+TurboDerp-codec arm measured `0.030274917976982833`. At uniform K4 the
+corresponding full-body values were `0.03776677825098351` and
+`0.02137210911467856`. These results isolate allocation quality from codec and
+calibration quality: the allocation result is positive, while the current
+encoder/calibration stack remains behind TurboDerp. See the
+[matched comparison report](docs/QWEN_POSTTRAINED_TURBODERP_COMPARISON.md) and
+[compact sealed record](results/qwen3-30b-a3b-posttrained/fullscope-summary.json).
+
 ## Status: first full Qwen/B200 control measured and independently verified
 
 This repository now contains local implementations of the calibration fitter,
