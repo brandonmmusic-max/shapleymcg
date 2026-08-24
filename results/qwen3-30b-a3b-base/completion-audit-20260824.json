@@ -1,0 +1,81 @@
+{
+  "audit_date": "2026-08-24",
+  "audit_sha256": "39f9a815dd0c88daf0d8f792feaac243558baf1dc6b8702fac0c3873cc396aac",
+  "causal_kld_fresh_replay": {
+    "installed_layer_count": 48,
+    "max_token_kld_difference": 9.037215420448774e-13,
+    "mean_kld": 0.0550610707424724,
+    "reanchor_count": 12,
+    "report_sha256": "f1ac3903116141faa18bf2f8253ebd875730451f8c0a23645b366fd5517a072b",
+    "teacher_sha256": "ae11557e20e0705a20fa24ec5def667403ca0f1771d64c638e4349ffb6ce0bb9",
+    "top1_agreement": 0.912066438690767,
+    "verification_sha256": "b866e70b5e48433b3d9a014531acb0c460b3788198f3f8855830b6e58fd93fe6"
+  },
+  "control_bundle": {
+    "bytes": 2715850371,
+    "candidate_layers": 48,
+    "files": 52,
+    "fit_layers": 48,
+    "manifest_sha256": "5df0be67d3eac61902cb265bb3a9c5a57e889c7ebcaaf0924fa77c77517b106f",
+    "remote_methods": {
+      "download_sha256": 40,
+      "lfs_sha256": 12
+    }
+  },
+  "dataset": {
+    "causal_reference_revision": "89b989fc45cba9e841c5083d38c16cd8734041bb",
+    "control_reference_revision": "c9c2b001dd943b8251fc0102ec76ab1b8d572219",
+    "audited_revision": "18dec5c769b4e39ee641067d0aea462e9c9406e6",
+    "path_sets": {
+      "candidates": 192,
+      "causal_arm_v3": 94,
+      "fixed_control": 53,
+      "fits": 37056
+    },
+    "repo_id": "brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility",
+    "tree_ids": {
+      "candidates": "cb576237de9f7f45e648a961fa5013d9d65eeb97",
+      "causal_arm_v3": "7a6600afbb7de81e48db31fe11b8b9a53518a856",
+      "fixed_control": "84d177742b5466eb4250546e5ff6b35bcfcb710b",
+      "fits": "7f70f39a03990dec6552b4a99b9cc0807fa427be"
+    }
+  },
+  "github": {
+    "audited_implementation_revision": "5dfef1f8de23faa67dd57587e895e129c796f329",
+    "publication_branches": [
+      "main",
+      "publish/v0.2"
+    ],
+    "repo": "brandonmmusic-max/shapleymcg",
+    "tests_passed": 268
+  },
+  "layer_receipts": {
+    "candidate_bytes": 141572244523,
+    "candidate_layers": 48,
+    "candidate_payload_files": 144,
+    "fit_bytes": 117723491409,
+    "fit_layers": 48,
+    "fit_payload_files": 37008,
+    "total_bytes": 259295735932,
+    "total_payload_files": 37152
+  },
+  "lineage": {
+    "glm_calibration_jsonl_sha256": "cf247acc7c5da9f0600c7d6ab3b7c2fcfc54ec30b794e3b6047559285fa44df4",
+    "qwen_bf16_teacher_logits_sha256": "ae11557e20e0705a20fa24ec5def667403ca0f1771d64c638e4349ffb6ce0bb9",
+    "qwen_token_ids_sha256": "551b98fd34866582068d77bf0875557bafbfe5cb1b1fa94459b4e5cc38d9073b",
+    "source_prefix_sha256": "293ff4a5d4d8e4e5a1b875d2f786895e491180523af99a8eea89321ae22e68ce",
+    "wikitext_revision": "b08601e04326c79dfdd32d625aee71d232d685c3"
+  },
+  "model": {
+    "current_card_revision": "e7443e7d57770461e0aab9beb03e9ea814d43ee9",
+    "manifest_bytes": 61079798645,
+    "manifest_files": 31,
+    "manifest_sha256": "32fec13a96c6c85eb394939a6eb511c821bd05e8ac0960268852d33150d0cde1",
+    "manifest_verified_revision": "c3447f3f8e231ae83afa10ba263346d1ceb98c11",
+    "non_readme_files_unchanged": 31,
+    "publication_receipt_revision": "fbdd05904fd4018dea9fd0f25ed4800c15df1493",
+    "publication_receipt_sha256": "e7b3b344321c11e872fc006cbd009c935b9fdbf0fdb8b2b0a99197cce14bffe8",
+    "repo_id": "brandonmusic/Qwen3-30B-A3B-ShapleyMCG-K34-Validation-Reconstruction"
+  },
+  "schema": "shapleymcg.qwen-base-completion-audit.v1"
+}

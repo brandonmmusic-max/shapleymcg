@@ -10,7 +10,7 @@ the expanded validation reconstruction to a compact runtime checkpoint.
 
 | Requirement | Current evidence | Result |
 | --- | --- | --- |
-| Executable calibration-to-encoding implementation | GitHub commit `2fadc8f7e322376cf0b0f9e69ac301f59d74b580` contains the fixed-Hadamard and causal paths; its full suite passes 246 tests with 19 explicit skips | Proven for the fixed-Hadamard and causal Base experiments |
+| Executable calibration-to-encoding implementation | Audited GitHub revision `5dfef1f8de23faa67dd57587e895e129c796f329` contains the fixed-Hadamard and causal paths; its full suite passes 268 tests | Proven for the fixed-Hadamard and causal Base experiments |
 | Immutable Base parent | `Qwen/Qwen3-30B-A3B-Base@1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9`; source receipt is in the control bundle | Proven |
 | Historical GLM KLD procedure lineage | Pinned `Salesforce/wikitext` revision, source prefix, Qwen token IDs, construction rules, KLD window, and Qwen BF16 teacher logits are all sealed in the bundle | Proven as a target-tokenized reproduction of the procedure, not reused GLM token IDs/logits |
 | Calibration identity and role separation | Original and role-safe JSONL, sealed corpus, fit/selection/confirmation capture manifests, exact token hashes, and receipts are in the bundle | Proven |
@@ -21,12 +21,44 @@ the expanded validation reconstruction to a compact runtime checkpoint.
 | Packed runtime qualification | The published model is an expanded BF16 reconstruction; official BTX cannot express its independent gate/up choices | Not claimed and outside this completed control |
 | Full Aumann-Shapley/causal research arm | 48-layer path attribution, routed Fisher/Jacobian split, explicit remainder reconciliation, exact-rate allocation, two matched SDPA panels, and independent replays are sealed | Proven for allocation-quality KLD; packed runtime remains separate |
 
+## Fresh completion refresh
+
+The completion refresh repeated the remote checks instead of relying only on
+the earlier publication receipts. Its machine-readable record is
+[`completion-audit-20260824.json`](../results/qwen3-30b-a3b-base/completion-audit-20260824.json).
+
+- Audited implementation revision
+  `5dfef1f8de23faa67dd57587e895e129c796f329` is reachable from both GitHub
+  `main` and `publish/v0.2`.
+- At audited dataset revision
+  `18dec5c769b4e39ee641067d0aea462e9c9406e6`, there are 37,056 fit paths, 192
+  candidate paths, 53 fixed-control paths, and 94 causal-arm paths. Each path
+  set and its Git tree object are identical to the corresponding immutable
+  reference revision.
+- All 48 fit plus 48 candidate receipt chains revalidated. Their upload
+  manifests cover 37,152 payload files and 259,295,735,932 bytes.
+- The fixed-control bundle's 52 manifested files revalidated by downloaded
+  SHA-256 or Hub LFS SHA-256: 2,715,850,371 bytes total.
+- All 31 non-README model files at the current model-card revision are
+  byte-identical to the publication-receipt revision. The sealed content
+  manifest independently revalidated 31 files and 61,079,798,645 bytes.
+- A fresh independent float64 replay of the 2,047-position causal result again
+  measured KLD `0.0550610707424724`, top-1 agreement
+  `0.912066438690767`, and maximum tokenwise difference
+  `9.037215420448774e-13`; its verification seal is unchanged.
+- The original GLM calibration JSONL and the preserved Base copy both hash to
+  `cf247acc7c5da9f0600c7d6ab3b7c2fcfc54ec30b794e3b6047559285fa44df4`.
+  The KLD procedure separately preserves the pinned WikiText-2 source prefix,
+  Qwen token IDs, construction rules, and BF16 teacher logits.
+
 ## Immutable publication pins
 
 ### Reproducibility dataset
 
 - Repository: `brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility`
-- Current audited repository head: `18dec5c769b4e39ee641067d0aea462e9c9406e6`
+- Audited artifact revision: `18dec5c769b4e39ee641067d0aea462e9c9406e6`
+- Completion-audit/card revision:
+  `c423893d0aafc32d9eb6a15ffd55b3d909fb97e9`
 - Fixed control folder revision: `c9c2b001dd943b8251fc0102ec76ab1b8d572219`
 - All 37,301 current files under `fits/`, `candidates/`, and
   `controls/fixed-hadamard-k34-v1/` are metadata-identical to that immutable
@@ -69,7 +101,7 @@ the expanded validation reconstruction to a compact runtime checkpoint.
 - Publication-receipt revision:
   `fbdd05904fd4018dea9fd0f25ed4800c15df1493`
 - Current model-card revision:
-  `785cb47dbd900ed4a3f045b5f9f7a638db72841e`
+  `e7443e7d57770461e0aab9beb03e9ea814d43ee9`
 - Verified content inventory: 31 files, 61,079,798,645 bytes
 - Model manifest inventory: 30 payload files plus the manifest; every row was
   rechecked against remote size and either Hub LFS SHA-256 or Git-blob SHA-1

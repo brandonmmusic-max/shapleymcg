@@ -11,6 +11,16 @@ tokenwise KLD, allocations, attribution ledgers, hashes, and publication
 receipts for the Qwen3-30B-A3B experiments in
 [`brandonmmusic-max/shapleymcg`](https://github.com/brandonmmusic-max/shapleymcg).
 
+The complete cross-checkpoint
+[`results ledger`](https://github.com/brandonmmusic-max/shapleymcg/blob/main/docs/QWEN_COMPLETE_RESULTS_LEDGER.md)
+and
+[`method specification`](https://github.com/brandonmmusic-max/shapleymcg/blob/main/docs/SHAPLEYMCG_METHOD.md)
+distinguish the predecessor routed-p2 allocator from the full causal method.
+The fresh machine-readable
+[`Base completion audit`](./audits/completion-audit-20260824.json) records the
+immutable tree identities, layer receipt closure, model-manifest audit, corpus
+lineage hashes, and independent KLD replay used for final verification.
+
 ## Causal allocation result
 
 The complete two-level Aumann–Shapley/Fisher allocation improves on the
