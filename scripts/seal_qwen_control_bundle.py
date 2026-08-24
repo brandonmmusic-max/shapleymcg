@@ -170,6 +170,24 @@ full Qwen control run of the ShapleyMCG pipeline.
 - Allocation SHA256: `{allocation['allocation_sha256']}`
 - KLD report SHA256: `{report['report_sha256']}`
 
+## Same-parent expert-rate controls
+
+The primary allocation-quality comparison keeps the Base parent, ten-by-2,048
+WikiText token panel, BF16 teacher logits, and source-BF16 attention, routers,
+and head fixed:
+
+| Expert allocation | Expert logical BPW | Mean KLD | Top-1 agreement |
+|---|---:|---:|---:|
+| Uniform K3 | 3.0 | 0.09943217778983483 | 0.8728515625 |
+| **ShapleyMCG mixed K3/K4** | **3.5** | **0.05005581795647327** | **0.908447265625** |
+| Uniform K4 | 4.0 | 0.033991548914098856 | 0.922509765625 |
+
+The selected mix is 24.9671% below the linear K3/K4 KLD midpoint and 13.8995%
+below the geometric midpoint. A separate PyTorch `kl_div` implementation
+recomputed the mixed mean as 0.05005581997721873 and matched top-1 exactly.
+The sealed panels, logits, reports, and verification are under
+`results/qwen3-30b-a3b-v1` in this dataset.
+
 The exact expanded BF16 validation model is published at
 [`brandonmusic/Qwen3-30B-A3B-ShapleyMCG-K34-Validation-Reconstruction`](https://huggingface.co/brandonmusic/Qwen3-30B-A3B-ShapleyMCG-K34-Validation-Reconstruction).
 Its verified publication receipt is included in this control bundle.
