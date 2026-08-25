@@ -18,6 +18,7 @@ BASELINE_INVENTORY=${BASELINE_INVENTORY:-/artifacts/shapleymcg/qwen3-30b-a3b-v1/
 TEACHER_PANEL_ROOT=${TEACHER_PANEL_ROOT:-/artifacts/shapleymcg/qwen3-30b-a3b-v1/causal-arm-v3/turboderp-wiki2-sdpa-teacher}
 HF_REPO=${HF_REPO:-brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility}
 HF_PATH_PREFIX=${HF_PATH_PREFIX:-candidate-factories/progressive-state-v1}
+HF_RESULT_PREFIX=${HF_RESULT_PREFIX:-results/qwen3-30b-a3b-base/progressive-candidate-v1}
 HF_TOKEN_SOURCE=${HF_TOKEN_SOURCE:-/root/.cache/huggingface/token}
 DRIVER_PID_FILE=${DRIVER_PID_FILE:-${RUN_ROOT}/logs/progressive-pipeline.pid}
 VALIDATION_ROOT=${VALIDATION_ROOT:-${RUN_ROOT}/frozen-causal-rate-validation-v1}
@@ -174,5 +175,43 @@ fi
     --label qwen3-30b-a3b-base-progressive-factory-frozen-causal-rate-sdpa-20k \
     --execute \
     2>&1 | tee "${LOG_ROOT}/progressive-frozen-rate-seal.log"
+
+publication_root="${RUN_ROOT}/artifacts/hf-upload/progressive-validation"
+mkdir -p "${publication_root}"
+publication_receipt="${publication_root}/publication-receipt.json"
+if ! test -s "${publication_receipt}"; then
+    "${PYTHON}" "${CODE_ROOT}/scripts/upload_sealed_artifact_tree_hf.py" \
+        --repo "${HF_REPO}" \
+        --repo-type dataset \
+        --local-root "${VALIDATION_ROOT}" \
+        --path-in-repo "${HF_RESULT_PREFIX}" \
+        --receipt "${publication_receipt}" \
+        --commit-message "Publish Qwen progressive candidate validation" \
+        --execute \
+        2>&1 | tee "${LOG_ROOT}/progressive-validation-hf-upload.log"
+fi
+
+data_revision=$("${PYTHON}" - "${publication_receipt}" <<'PY'
+import json
+import pathlib
+import sys
+
+print(json.loads(pathlib.Path(sys.argv[1]).read_text())["revision"])
+PY
+)
+verification_receipt="${publication_root}/remote-verification.json"
+if ! test -s "${verification_receipt}"; then
+    "${PYTHON}" "${CODE_ROOT}/scripts/verify_hf_artifact_tree.py" \
+        --repo "${HF_REPO}" \
+        --repo-type dataset \
+        --revision "${data_revision}" \
+        --path-in-repo "${HF_RESULT_PREFIX}" \
+        --local-root "${VALIDATION_ROOT}" \
+        --output "${verification_receipt}" \
+        --publish-output-path "${HF_RESULT_PREFIX}/REMOTE_VERIFICATION.json" \
+        --publish-message "Verify Qwen progressive candidate validation" \
+        --execute \
+        2>&1 | tee "${LOG_ROOT}/progressive-validation-hf-verify.log"
+fi
 
 printf 'progressive frozen-causal-rate validation completed\n'
