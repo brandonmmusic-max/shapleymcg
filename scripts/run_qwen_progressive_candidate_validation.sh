@@ -191,6 +191,19 @@ if ! test -s "${lineage_output}/lineage.json"; then
         2>&1 | tee "${LOG_ROOT}/progressive-glm-lineage.log"
 fi
 
+summary_output="${VALIDATION_ROOT}/result-summary.json"
+if ! test -s "${summary_output}"; then
+    "${PYTHON}" "${CODE_ROOT}/scripts/summarize_qwen_progressive_candidate_result.py" \
+        --native-panel-report /artifacts/shapleymcg/qwen3-30b-a3b-v1/causal-arm-v3/panel-sdpa-causal/kld-report.json \
+        --fast-progressive-report "${RUN_ROOT}/fast-k34-kld-sdpa/kld-report.json" \
+        --progressive-panel-report "${panel_output}/kld-report.json" \
+        --factory-union-report "${union_output}/report.json" \
+        --lineage "${lineage_output}/lineage.json" \
+        --output "${summary_output}" \
+        --execute \
+        2>&1 | tee "${LOG_ROOT}/progressive-result-summary.log"
+fi
+
 "${PYTHON}" "${CODE_ROOT}/scripts/seal_artifact_tree.py" \
     --root "${VALIDATION_ROOT}" \
     --label qwen3-30b-a3b-base-progressive-factory-frozen-causal-rate-sdpa-20k \
