@@ -26,7 +26,6 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--native-panel-report", type=Path, required=True)
     parser.add_argument("--fast-progressive-report", type=Path, required=True)
-    parser.add_argument("--progressive-panel-report", type=Path, required=True)
     parser.add_argument("--factory-union-report", type=Path, required=True)
     parser.add_argument("--lineage", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -38,8 +37,6 @@ def main() -> int:
         "native_panel_report_file_sha256": sha256_file(args.native_panel_report),
         "fast_progressive_report": str(args.fast_progressive_report.resolve()),
         "fast_progressive_report_file_sha256": sha256_file(args.fast_progressive_report),
-        "progressive_panel_report": str(args.progressive_panel_report.resolve()),
-        "progressive_panel_report_file_sha256": sha256_file(args.progressive_panel_report),
         "factory_union_report": str(args.factory_union_report.resolve()),
         "factory_union_report_file_sha256": sha256_file(args.factory_union_report),
         "lineage": str(args.lineage.resolve()),
@@ -53,11 +50,9 @@ def main() -> int:
 
     native = _load(args.native_panel_report, "report_sha256", "native panel")
     fast = _load(args.fast_progressive_report, "report_sha256", "fast progressive")
-    progressive = _load(args.progressive_panel_report, "report_sha256", "progressive panel")
     union = _load(args.factory_union_report, "report_sha256", "factory union")
     lineage = _load(args.lineage, "lineage_sha256", "GLM lineage")
     native_mean = float(native["summary"]["mean"])
-    progressive_mean = float(progressive["summary"]["mean"])
     endpoint = union["untouched_validation"]
     union_baseline = float(endpoint["baseline_summary"]["mean"])
     union_mean = float(endpoint["union_summary"]["mean"])
@@ -66,8 +61,8 @@ def main() -> int:
         raise ValueError("factory-union paired interval is invalid")
     body = {
         "schema": "quant-pipeline.qwen-progressive-candidate-result.v1",
-        "model_revision": progressive["model_revision"],
-        "attention_backend": progressive["attention_backend"],
+        "model_revision": union["model_revision"],
+        "attention_backend": union["attention_backend"],
         "rate": {
             "scope": "routed-expert-matrix-weights",
             "logical_bpw": 3.5,
@@ -88,17 +83,6 @@ def main() -> int:
             "report_sha256": fast["report_sha256"],
             "interpretation": "fast diagonal-allocation candidate-pipeline diagnostic",
         },
-        "frozen_causal_rate_panel": {
-            "positions": int(progressive["summary"]["count"]),
-            "native_source_state_mean_kld": native_mean,
-            "progressive_state_mean_kld": progressive_mean,
-            "absolute_native_minus_progressive": native_mean - progressive_mean,
-            "relative_native_minus_progressive": (native_mean - progressive_mean) / native_mean,
-            "progressive_is_lower": progressive_mean < native_mean,
-            "native_report_sha256": native["report_sha256"],
-            "progressive_report_sha256": progressive["report_sha256"],
-            "allocation_sha256": progressive["allocation_sha256"],
-        },
         "factory_union_untouched_validation": {
             "selection_row": int(union["selection"]["row"]),
             "validation_rows": list(endpoint["rows"]),
@@ -114,11 +98,17 @@ def main() -> int:
             "row_count": int(endpoint["row_count"]),
             "report_sha256": union["report_sha256"],
             "factory_allocation_sha256": union["factory_allocation_sha256"],
+            "selected_challenger_layers": [
+                int(row["layer"])
+                for row in union["selection"]["greedy_path"]
+                if row["accepted"]
+            ],
         },
         "claim_boundary": {
             "frozen_rate_candidate_quality_ablation": True,
             "candidate_family_selected_inside_process": True,
             "selection_and_validation_rows_disjoint": True,
+            "single_final_untouched_endpoint": True,
             "joint_matrix_level_factory_plus_rate_claim": False,
             "packed_runtime_throughput_claim": False,
         },
@@ -132,7 +122,7 @@ def main() -> int:
         "ok": True,
         "summary_sha256": body["summary_sha256"],
         "fast_progressive_mean_kld": body["fast_progressive_diagnostic"]["mean_kld"],
-        "progressive_panel_mean_kld": progressive_mean,
+        "historical_native_panel_mean_kld": native_mean,
         "factory_union_validation_mean_kld": union_mean,
         "factory_union_interval_excludes_zero": interval[0] > 0.0,
     }, sort_keys=True), flush=True)

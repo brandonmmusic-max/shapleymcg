@@ -132,26 +132,6 @@ if ! test -s "${allocation}"; then
         2>&1 | tee "${LOG_ROOT}/progressive-frozen-rate-rebase.log"
 fi
 
-panel_output="${VALIDATION_ROOT}/panel-sdpa-20k"
-if ! test -s "${panel_output}/kld-report.json"; then
-    "${PYTHON}" "${CODE_ROOT}/scripts/measure_qwen_mcg_panel_allocation.py" \
-        --source-model "${MODEL}" \
-        --model-revision "${MODEL_REVISION}" \
-        --allocation "${allocation}" \
-        --candidate-inventory "${inventory}" \
-        --local-encode-root "${RUN_ROOT}/fast-encode" \
-        --candidate-cache "${RUN_ROOT}/candidate-cache" \
-        --panel-root "${TEACHER_PANEL_ROOT}" \
-        --teacher-root "${TEACHER_PANEL_ROOT}/teacher-logits" \
-        --teacher-receipt "${TEACHER_PANEL_ROOT}/teacher-receipt.json" \
-        --token-key input_ids \
-        --output "${panel_output}" \
-        --device-map balanced \
-        --attention-backend sdpa \
-        --execute \
-        2>&1 | tee "${LOG_ROOT}/progressive-frozen-rate-panel.log"
-fi
-
 union_output="${VALIDATION_ROOT}/factory-union-native-vs-progressive"
 if ! test -s "${union_output}/report.json"; then
     "${PYTHON}" "${CODE_ROOT}/scripts/measure_qwen_mcg_factory_union.py" \
@@ -196,7 +176,6 @@ if ! test -s "${summary_output}"; then
     "${PYTHON}" "${CODE_ROOT}/scripts/summarize_qwen_progressive_candidate_result.py" \
         --native-panel-report /artifacts/shapleymcg/qwen3-30b-a3b-v1/causal-arm-v3/panel-sdpa-causal/kld-report.json \
         --fast-progressive-report "${RUN_ROOT}/fast-k34-kld-sdpa/kld-report.json" \
-        --progressive-panel-report "${panel_output}/kld-report.json" \
         --factory-union-report "${union_output}/report.json" \
         --lineage "${lineage_output}/lineage.json" \
         --output "${summary_output}" \
@@ -206,7 +185,7 @@ fi
 
 "${PYTHON}" "${CODE_ROOT}/scripts/seal_artifact_tree.py" \
     --root "${VALIDATION_ROOT}" \
-    --label qwen3-30b-a3b-base-progressive-factory-frozen-causal-rate-sdpa-20k \
+    --label qwen3-30b-a3b-base-final-native-progressive-factory-union-sdpa-20k \
     --execute \
     2>&1 | tee "${LOG_ROOT}/progressive-frozen-rate-seal.log"
 
@@ -248,4 +227,4 @@ if ! test -s "${verification_receipt}"; then
         2>&1 | tee "${LOG_ROOT}/progressive-validation-hf-verify.log"
 fi
 
-printf 'progressive frozen-causal-rate validation completed\n'
+printf 'final progressive factory-union validation completed\n'
