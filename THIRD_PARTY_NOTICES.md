@@ -12,6 +12,11 @@ build on their work. The BTX writer is the disclosed derived exception.
 - turboderp and ExLlamaV3 contributors for EXL3/Trellis quantization and its
   encoder/runtime ecosystem.
 - The Qwen Team for Qwen3 and `Qwen/Qwen3-30B-A3B-Base` (Apache-2.0).
+- Z.ai for GLM-5.2, the source model in the preserved prior-control lineage.
+- malaiwah for the GLM-5.2 MTP-78 overlay and calibration capture, and Josh
+  Cartu for the associated MTP-78 recipe and rank-sliced runtime work. These
+  credits identify the named predecessor's provenance; the Qwen experiment
+  does not incorporate the MTP-78 runtime or draft layer.
 - The MC-MoE, HIGGS, PQI, GuidedQuant, MoEQuant, EAC-MoE, and VSRAQ authors
   for the mixed-precision, end-loss, router-aware, and route-shift research
   identified precisely in `docs/REFERENCES.md`.

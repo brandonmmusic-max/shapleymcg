@@ -140,6 +140,15 @@ def test_resource_estimator_uses_qwen_geometry_and_retention():
         "parameters": 30_500_000_000,
         "top_k": 8,
     }
+    assert report["schema"] == "quant-pipeline.qwen-resource-estimate.v2"
+    assert report["windows"] == {
+        "conditional_fit": 16,
+        "confirmation": 16,
+        "final": 25,
+        "fit": 32,
+        "selection": 16,
+        "tokens": 2048,
+    }
     assert report["recommended"]["estimated_peak_disk_bytes"] > 0
     assert report["recommended"]["minimum_free_vram_bytes_per_gpu"] > 61_000_000_000
     adapter = json.loads((CONFIG / "adapter-config.json").read_text())

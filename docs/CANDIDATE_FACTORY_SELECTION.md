@@ -11,9 +11,14 @@ Candidate generation and candidate allocation are therefore tested as separate
 causal factors. The upstream EXL3 factory is an additional candidate source,
 not a baseline to discard and not an attribution shortcut.
 
-## Production architecture: candidate union is part of the method
+## Target extension architecture: candidate union
 
-The production pipeline does not choose one encoder family in advance. Its
+**Status: implemented primitives, not a validated real-model endpoint.** The
+architecture below is the required design for a future coupled factory/rate
+extension. Present result claims come only from the frozen-rate whole-layer
+experiments documented later in this file.
+
+The intended pipeline does not choose one encoder family in advance. Its
 candidate stage registers the native MCG factory as required and may register
 ModelOpt, upstream EXL3, or future factories as additional proposers. For every
 independently allocatable weight unit and requested rate, all available
@@ -94,9 +99,8 @@ gave `[-0.00011704741100369084, 0.0019815815832019573]` for baseline minus
 union. Because that interval crosses zero, this is directional held-out
 evidence that the pools contain complementary layer reconstructions. It does
 not establish candidate-factory superiority at the 95% interval gate. The
-correct production response is to retain both factories in the candidate
-quiver and validate the eventual coupled allocation on a larger untouched
-panel.
+result motivates retaining both factories as research candidates; it does not
+require a production union or predict that a coupled allocation will win.
 
 The report seal is
 `1b8897431f07768405afc1d4d98d970acdec84733d2e3bacc49da301978492a1`;
@@ -153,7 +157,20 @@ inventory needed for all three steps. The resumable
 `run_qwen_progressive_candidate_validation.sh` driver enforces this order and
 seals the resulting validation tree.
 
-## Matrix-level candidate ledger
+The completed Base run improved its selection row by 15.387% but was 0.388%
+worse on the nine untouched rows (`0.0440954931802` native versus
+`0.0442667367035` union); the paired interval crossed zero. It is therefore a
+completed negative/directional frozen-rate diagnostic, not evidence for the
+unexecuted joint allocator. Exact seals and the immutable Hub revision are in
+[`RESULTS.md`](../RESULTS.md).
+
+## Matrix-level candidate ledger: unvalidated extension
+
+The code surfaces for the ledger and coupled allocator exist and fail closed
+on incomplete coverage, incompatible shared domains, or byte-budget failure.
+They have not completed a sealed real-Qwen reconstruction, untouched KLD
+endpoint, or independent replay. The steps below are therefore the
+qualification protocol, not a description of a measured result.
 
 The competitive ledger keys each candidate by
 `(layer, expert, projection, bits, factory, reconstruction_sha256)` and retain

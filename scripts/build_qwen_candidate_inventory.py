@@ -71,25 +71,68 @@ def _load_layer(api: Any, repo: str, revision: str, prefix: str, layer: int) -> 
     }
 
 
+def _load_local_layer(root: Path, layer: int) -> dict[str, Any]:
+    layer_root = root / f"layer-{layer:03d}"
+    receipt_path = layer_root / "encode-receipt.json"
+    receipt = json.loads(receipt_path.read_text())
+    seal = receipt.get("receipt_sha256")
+    if seal != _hash_json({key: value for key, value in receipt.items() if key != "receipt_sha256"}):
+        raise ValueError(f"layer {layer} encode receipt seal mismatch")
+    if int(receipt.get("layer", -1)) != layer or receipt.get("experts") != list(range(128)):
+        raise ValueError(f"layer {layer} encode receipt inventory is incomplete")
+    candidate_path = layer_root / str(receipt["candidate_tensor_file"])
+    expected_bytes = int(receipt["candidate_tensor_bytes"])
+    expected_sha256 = str(receipt["candidate_tensor_sha256"])
+    if (
+        not candidate_path.is_file()
+        or candidate_path.is_symlink()
+        or candidate_path.stat().st_size != expected_bytes
+        or sha256_file(candidate_path) != expected_sha256
+    ):
+        raise ValueError(f"layer {layer} local candidate payload differs from its receipt")
+    return {
+        "layer": layer,
+        "receipt_path": receipt_path.relative_to(root).as_posix(),
+        "receipt_file_sha256": sha256_file(receipt_path),
+        "receipt_sha256": seal,
+        "candidate_path": candidate_path.relative_to(root).as_posix(),
+        "candidate_bytes": expected_bytes,
+        "candidate_sha256": expected_sha256,
+        "score_inventory_sha256": _hash_json(receipt["scores"]),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--repo", required=True)
-    parser.add_argument("--revision", required=True)
+    parser.add_argument("--repo")
+    parser.add_argument("--revision")
+    parser.add_argument(
+        "--local-root",
+        type=Path,
+        help="build from a complete local fast-encode tree without publishing it",
+    )
     parser.add_argument("--path-prefix", default="")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=12)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
-    if REVISION.fullmatch(args.revision) is None:
-        parser.error("--revision must be an immutable 40-hex Hub commit")
+    if args.local_root is None:
+        if not args.repo or not args.revision:
+            parser.error("remote inventory requires --repo and --revision")
+        if REVISION.fullmatch(args.revision) is None:
+            parser.error("--revision must be an immutable 40-hex Hub commit")
+    elif args.repo is not None or args.revision is not None:
+        parser.error("--local-root is mutually exclusive with --repo/--revision")
     if args.workers < 1:
         parser.error("--workers must be positive")
     prefix = "/".join(part for part in args.path_prefix.strip("/").split("/") if part)
     if any(part in {".", ".."} for part in prefix.split("/") if part):
         parser.error("--path-prefix cannot contain dot path components")
     plan = {
+        "source": "local" if args.local_root is not None else "hugging-face",
         "repo": args.repo,
         "revision": args.revision,
+        "local_root": str(args.local_root.resolve()) if args.local_root is not None else None,
         "path_prefix": prefix,
         "output": str(args.output.resolve()),
         "dry_run": not args.execute,
@@ -98,23 +141,44 @@ def main() -> int:
     if not args.execute:
         return 0
 
-    from huggingface_hub import HfApi
+    if args.local_root is not None:
+        local_root = args.local_root.resolve()
+        if not local_root.is_dir() or local_root.is_symlink():
+            raise ValueError("--local-root must be a regular directory")
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            layers = list(pool.map(lambda layer: _load_local_layer(local_root, layer), range(48)))
+        repo_id = "local-only-no-repository"
+        revision = "0" * 40
+        source = {
+            "kind": "local-sealed-fast-encode-tree",
+            "root": str(local_root),
+            "publication_side_effect": False,
+        }
+    else:
+        from huggingface_hub import HfApi
 
-    api = HfApi()
-    info = api.repo_info(repo_id=args.repo, repo_type="dataset", revision=args.revision)
-    if str(info.sha) != args.revision:
-        raise ValueError("candidate revision did not resolve exactly")
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        layers = list(pool.map(
-            lambda layer: _load_layer(api, args.repo, args.revision, prefix, layer),
-            range(48),
-        ))
+        api = HfApi()
+        info = api.repo_info(repo_id=args.repo, repo_type="dataset", revision=args.revision)
+        if str(info.sha) != args.revision:
+            raise ValueError("candidate revision did not resolve exactly")
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            layers = list(pool.map(
+                lambda layer: _load_layer(api, args.repo, args.revision, prefix, layer),
+                range(48),
+            ))
+        repo_id = args.repo
+        revision = args.revision
+        source = {
+            "kind": "immutable-hugging-face-revision",
+            "publication_side_effect": False,
+        }
     body = {
         "schema": "quant-pipeline.qwen-hf-mcg-candidate-inventory.v2",
-        "repo_id": args.repo,
+        "repo_id": repo_id,
         "repo_type": "dataset",
-        "revision": args.revision,
+        "revision": revision,
         "path_prefix": prefix,
+        "source": source,
         "layers": layers,
     }
     body["inventory_sha256"] = _hash_json(body)

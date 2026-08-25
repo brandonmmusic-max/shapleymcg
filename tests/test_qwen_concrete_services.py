@@ -13,6 +13,7 @@ from quant_pipeline.campaign.qwen_services import (
     QwenCheckpointService,
     QwenCodecService,
     QwenEvaluatorService,
+    _requested_allocation_arm,
 )
 from quant_pipeline.campaign.runner import CampaignDefinition, _build_stages
 from quant_pipeline.core.artifacts import canonical_json, sha256_bytes, sha256_file, write_json
@@ -57,7 +58,12 @@ def test_real_stage_graph_supplies_every_qwen_codec_install_dependency(tmp_path)
         reanchor_failure_policy="request_reallocation",
         retention_mode="capture-plus-ledger",
     )
-    encode = next(stage for stage in _build_stages(definition) if stage.kind == "causal_encode")
+    stages = _build_stages(definition)
+    capture = next(stage for stage in stages if stage.kind == "fit_capture")
+    fit = next(stage for stage in stages if stage.kind == "fit")
+    encode = next(stage for stage in stages if stage.kind == "causal_encode")
+    assert capture.block_layers == (0,)
+    assert fit.block_layers == (0,)
     assert "causal_fit.layer_000" in encode.dependencies
     assert "causal_candidates.layer_000" in encode.dependencies
 
@@ -149,6 +155,68 @@ def test_official_btx_filter_rejects_unexpressible_choices_before_dp():
     assert ok is False and "TP2" in reason
 
 
+def test_requested_research_arm_cannot_silently_collapse_to_runtime_k3():
+    research = {
+        "stored_bytes": 7,
+        "selected_cost": {"allocated_payload_bytes": 7},
+        "choices": [{
+            "unit_id": "L0.E0",
+            "choice_id": "L0.E0.g4u4d4",
+            "candidate_record_sha256": "4" * 64,
+        }],
+    }
+    runtime = {
+        "stored_bytes": 6,
+        "selected_cost": {"allocated_payload_bytes": 6},
+        "choices": [{
+            "unit_id": "L0.E0",
+            "choice_id": "L0.E0.g3u3d3",
+            "candidate_record_sha256": "3" * 64,
+        }],
+    }
+    allocation = {
+        "requested_allocation_arm": "research_arm",
+        "research_arm": research,
+        "runtime_qualified_arm": runtime,
+        "serving_arm": runtime,
+    }
+    with pytest.raises(RuntimeError, match="refusing to substitute"):
+        _requested_allocation_arm(
+            allocation,
+            {
+                "requested_allocation_arm": "research_arm",
+                "require_fused_btx": True,
+                "require_exact_payload_budget": True,
+                "exact_payload_byte_budget": 7,
+            },
+        )
+
+
+def test_requested_runtime_arm_must_meet_exact_payload_budget():
+    runtime = {
+        "stored_bytes": 6,
+        "selected_cost": {"allocated_payload_bytes": 6},
+        "choices": [{
+            "unit_id": "L0.E0",
+            "choice_id": "L0.E0.g3u3d3",
+            "candidate_record_sha256": "3" * 64,
+        }],
+    }
+    with pytest.raises(RuntimeError, match="not the exact requested"):
+        _requested_allocation_arm(
+            {
+                "requested_allocation_arm": "runtime_qualified_arm",
+                "runtime_qualified_arm": runtime,
+            },
+            {
+                "requested_allocation_arm": "runtime_qualified_arm",
+                "require_fused_btx": True,
+                "require_exact_payload_budget": True,
+                "exact_payload_byte_budget": 7,
+            },
+        )
+
+
 def test_checkpoint_composition_uses_reconciled_total_and_nested_official_audit(tmp_path, monkeypatch):
     from quant_pipeline.campaign import qwen_services
 
@@ -228,9 +296,13 @@ def test_allocator_composition_persists_validated_selected_cost(tmp_path, monkey
     attribution_root = tmp_path / "attribution"
     attribution_root.mkdir()
     attribution = {
-        "schema": "quant-pipeline.qwen-attribution.v1",
+        "schema": "quant-pipeline.qwen-attribution.v2",
         "candidate_ledger_sha256": sha256_file(candidate_root / "candidate-ledger.json"),
-        "layers": [{"layer_index": 0, "expert_direct": [-0.25]}],
+        "layers": [{
+            "layer_index": 0,
+            "expert_direct": [-0.25],
+            "expert_allocation_score_reconciled": [-0.25],
+        }],
     }
     attribution["attribution_sha256"] = sha256_bytes(canonical_json(attribution))
     write_json(attribution_root / "attribution.json", attribution)
@@ -298,11 +370,21 @@ def test_allocator_composition_persists_validated_selected_cost(tmp_path, monkey
     assert document["attribution_file_sha256"] == sha256_file(attribution_root / "attribution.json")
     assert document["proxy_control_arm"]["selected_cost"] == selected_cost
     assert document["research_arm"]["selected_cost"] == selected_cost
+    assert document["runtime_qualified_arm"]["selected_cost"] == selected_cost
     assert document["serving_arm"]["selected_cost"] == selected_cost
+    assert document["requested_allocation_arm"] == "research_arm"
+    assert document["arm_contract"] == {
+        "research": "unconstrained-scientific-exact-byte-optimization",
+        "runtime_qualified": "official-btx-schema-and-fused-kernel-filtered",
+        "runtime_matches_research": True,
+        "substitution_policy": "forbidden",
+    }
     row = document["shapley_damage_calibration"]["unit_rows"][0]
-    assert row["provisional_unshifted_damage"] == pytest.approx(row["expert_direct"])
+    assert row["provisional_unshifted_damage"] == pytest.approx(
+        row["expert_allocation_score_reconciled"]
+    )
     assert row["provisional_shifted_damage"] == pytest.approx(
-        row["expert_direct"] + row["nonnegative_unit_offset"]
+        row["expert_allocation_score_reconciled"] + row["nonnegative_unit_offset"]
     )
     assert document["proxy_control_arm"]["choices"][0]["choice_id"] == "L0.E0.g3u3d3"
     assert document["research_arm"]["choices"][0]["choice_id"] == "L0.E0.g4u4d4"
@@ -354,9 +436,13 @@ def test_serving_filter_rejects_missing_expert_unit_before_dp(tmp_path, monkeypa
     attribution_root = tmp_path / "attribution"
     attribution_root.mkdir()
     attribution = {
-        "schema": "quant-pipeline.qwen-attribution.v1",
+        "schema": "quant-pipeline.qwen-attribution.v2",
         "candidate_ledger_sha256": sha256_file(candidate_root / "candidate-ledger.json"),
-        "layers": [{"layer_index": 0, "expert_direct": [0.25]}],
+        "layers": [{
+            "layer_index": 0,
+            "expert_direct": [0.25],
+            "expert_allocation_score_reconciled": [0.25],
+        }],
     }
     attribution["attribution_sha256"] = sha256_bytes(canonical_json(attribution))
     write_json(attribution_root / "attribution.json", attribution)

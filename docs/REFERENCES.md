@@ -30,6 +30,19 @@ The reproducibility bundle downloads the exact prior encoder closure from that
 repository at a pinned commit and verifies every file; its accompanying license
 remains controlling for those downloaded files.
 
+That prior checkpoint's own contributor record credits
+[Z.ai](https://z.ai/) for
+[GLM-5.2](https://huggingface.co/zai-org/GLM-5.2),
+[malaiwah](https://huggingface.co/malaiwah) for the
+[MTP-78 overlay](https://huggingface.co/malaiwah/GLM-5.2-EXL3-TR3-MTP78)
+and
+[calibration capture](https://huggingface.co/datasets/malaiwah/GLM-5.2-MTP78-calibration-capture),
+and [Josh Cartu](https://github.com/jcartu) for the MTP-78 recipe and
+rank-sliced runtime work. Those acknowledgements preserve the provenance of
+the named GLM predecessor. The Qwen experiment reuses the sealed calibration
+bytes and method lineage; it does not claim to incorporate the MTP-78 runtime
+or draft layer.
+
 The Shapley/Fisher/global-allocation components are additive experimental arms
 around that control. A control component is replaced only after a matched
 model, corpus, byte-budget, exact-codec, and final-logit-KL ablation wins.

@@ -21,7 +21,7 @@ from ..core.artifacts import canonical_json, sha256_bytes
 SCHEMA_FACTORY_IDENTITY = "quant-pipeline.candidate-factory-identity.v1"
 SCHEMA_FACTORY_UNIT = "quant-pipeline.candidate-factory-unit.v2"
 SCHEMA_FACTORY_PROPOSAL = "quant-pipeline.candidate-factory-proposal.v2"
-SCHEMA_COMMON_SCORE = "quant-pipeline.candidate-factory-common-score.v1"
+SCHEMA_COMMON_SCORE = "quant-pipeline.candidate-factory-common-score.v2"
 SCHEMA_FACTORY_UNION = "quant-pipeline.candidate-factory-union-ledger.v2"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 
@@ -192,21 +192,28 @@ class CommonCandidateScore:
     instrument_sha256: str
     calibration_fit_sha256: str
     metadata: Mapping[str, Any]
+    domain_fixed_damage: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         body = {
             "schema": SCHEMA_COMMON_SCORE,
-            "raw_damage": _finite_nonnegative(self.raw_damage, "raw damage"),
-            "calibrated_damage": _finite_nonnegative(
-                self.calibrated_damage, "calibrated damage"
-            ),
+            # Causal/Shapley contributions and factory-swap deltas may be
+            # signed.  The exact allocator only needs finite comparable
+            # objectives; forbidding negative values would bias away from
+            # genuinely beneficial substitutions.
+            "raw_damage": float(self.raw_damage),
+            "calibrated_damage": float(self.calibrated_damage),
             "uncertainty": _finite_nonnegative(self.uncertainty, "score uncertainty"),
+            "domain_fixed_damage": float(self.domain_fixed_damage),
             "instrument_sha256": _hash(self.instrument_sha256, "common instrument"),
             "calibration_fit_sha256": _hash(
                 self.calibration_fit_sha256, "score calibration fit"
             ),
             "metadata": dict(self.metadata),
         }
+        for key in ("raw_damage", "calibrated_damage", "domain_fixed_damage"):
+            if not math.isfinite(body[key]):
+                raise ValueError(f"{key.replace('_', ' ')} must be finite")
         body["score_sha256"] = _hash_json(body)
         return body
 
@@ -329,6 +336,7 @@ def build_factory_union(
                             "coupling_group_id": unit.coupling_group_id,
                             "compatibility_domain_sha256": proposal.compatibility_domain_sha256,
                             "fixed_shared_bytes": proposal.fixed_shared_bytes,
+                            "domain_fixed_damage": score["domain_fixed_damage"],
                             "proposal_sha256": proposal_row["proposal_sha256"],
                             "common_score_sha256": score["score_sha256"],
                             "record_sha256": record["record_sha256"],

@@ -25,6 +25,7 @@ class CorpusSpec:
     window_tokens: int = 2048
     seed: int = 20260823
     fit_windows: int = 32
+    conditional_fit_windows: int = 16
     selection_windows: int = 16
     confirmation_windows: int = 16
     final_windows: int = 25
@@ -86,6 +87,7 @@ class ExperimentSpec:
             raise ValueError("name and a 40-hex immutable model commit are required")
         roles = (
             self.corpus.fit_windows,
+            self.corpus.conditional_fit_windows,
             self.corpus.selection_windows,
             self.corpus.confirmation_windows,
             self.corpus.final_windows,

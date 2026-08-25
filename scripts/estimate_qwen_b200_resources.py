@@ -10,14 +10,25 @@ import json
 GIB = 1024**3
 
 
-def estimate(*, retention: str, fit: int, selection: int, confirmation: int, final: int, tokens: int) -> dict:
+def estimate(
+    *,
+    retention: str,
+    fit: int,
+    conditional_fit: int,
+    selection: int,
+    confirmation: int,
+    final: int,
+    tokens: int,
+) -> dict:
     layers, experts, top_k, hidden, intermediate = 48, 128, 8, 2048, 768
     parameters = 30_500_000_000
     source_bf16 = parameters * 2
     # Three retained p0/p1/p2 raw-second-moment arms in float64 for both input geometries.
     covariance_all_layers = layers * experts * (hidden**2 + intermediate**2) * 8 * 3
     covariance_one_layer = experts * (hidden**2 + intermediate**2) * 8 * 3
-    routed_windows = fit + selection + confirmation
+    # Candidate fitting may consume fit, conditional-fit, and selection state.
+    # Confirmation is prospective-only and must never feed candidate fitting.
+    routed_windows = fit + conditional_fit + selection
     routed_rows = routed_windows * tokens * layers * top_k
     routed_capture = routed_rows * (hidden + intermediate) * 2
     # The rank sketch is downstream per token/layer, not duplicated for every
@@ -27,7 +38,9 @@ def estimate(*, retention: str, fit: int, selection: int, confirmation: int, fin
     fisher_rank = 32
     fisher_all_layers = fisher_rows * hidden * fisher_rank * 2
     fisher = fisher_all_layers if retention == "full" else fisher_all_layers // layers
-    teacher_student_logits = 2 * final * tokens * 151_936 * 2
+    # Preserve teacher and student BF16 logits for both the post-freeze
+    # confirmation gate and the untouched final endpoint.
+    teacher_student_logits = 2 * (confirmation + final) * tokens * 151_936 * 2
     exact_payload_and_checkpoint = 2 * 24 * GIB
     stage_overhead = 32 * GIB
     retained_covariance = covariance_all_layers if retention == "full" else covariance_one_layer
@@ -43,7 +56,7 @@ def estimate(*, retention: str, fit: int, selection: int, confirmation: int, fin
     per_gpu = source_bf16 + 20 * GIB + 12 * GIB
     host_ram = source_bf16 + 2 * covariance_one_layer + 48 * GIB
     return {
-        "schema": "quant-pipeline.qwen-resource-estimate.v1",
+        "schema": "quant-pipeline.qwen-resource-estimate.v2",
         "geometry": {
             "layers": layers,
             "experts": experts,
@@ -54,6 +67,7 @@ def estimate(*, retention: str, fit: int, selection: int, confirmation: int, fin
         },
         "windows": {
             "fit": fit,
+            "conditional_fit": conditional_fit,
             "selection": selection,
             "confirmation": confirmation,
             "final": final,
@@ -78,6 +92,7 @@ def estimate(*, retention: str, fit: int, selection: int, confirmation: int, fin
         },
         "assumptions": [
             "conservative uncompressed routed captures",
+            "prospective confirmation is excluded from fitting and budgeted as retained logits",
             "rank-32 FP16 Fisher sketches",
             "one BF16 replica plus 32 GiB workspace per B200",
             "container padding and temporary compiler cache excluded from model bitrate but included by safety margin"
@@ -89,17 +104,26 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--retention", choices=("full", "capture-plus-ledger"), default="capture-plus-ledger")
     parser.add_argument("--fit-windows", type=int, default=32)
+    parser.add_argument("--conditional-fit-windows", type=int, default=16)
     parser.add_argument("--selection-windows", type=int, default=16)
     parser.add_argument("--confirmation-windows", type=int, default=16)
     parser.add_argument("--final-windows", type=int, default=25)
     parser.add_argument("--window-tokens", type=int, default=2048)
     args = parser.parse_args()
-    values = (args.fit_windows, args.selection_windows, args.confirmation_windows, args.final_windows, args.window_tokens)
+    values = (
+        args.fit_windows,
+        args.conditional_fit_windows,
+        args.selection_windows,
+        args.confirmation_windows,
+        args.final_windows,
+        args.window_tokens,
+    )
     if any(value <= 0 for value in values):
         raise SystemExit("window counts and token count must be positive")
     print(json.dumps(estimate(
         retention=args.retention,
         fit=args.fit_windows,
+        conditional_fit=args.conditional_fit_windows,
         selection=args.selection_windows,
         confirmation=args.confirmation_windows,
         final=args.final_windows,

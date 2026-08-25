@@ -1,0 +1,255 @@
+{
+  "rows": [
+    {
+      "schema": "shapleymcg.result-ledger-row.v1",
+      "id": "base-20k-progressive-native-factory-union",
+      "method_profile": {
+        "allocation": "full-aumann-shapley-fisher-frozen-exact-3p5",
+        "candidate_factory": "native-source-state-mcg-plus-progressive-state-mcg-whole-layer-union",
+        "calibration": "progressive-quantized-predecessor-state",
+        "codec": "exl3-mcg-native-and-progressive-state-candidate-families",
+        "encoding": "exact-candidate-bytes-selected-on-row-0"
+      },
+      "design": {
+        "kind": "frozen-rate-factory-diagnostic",
+        "rate_selection": "frozen",
+        "factory_selection": "selected",
+        "bindings": {
+          "allocation_plan_sha256": "d7bde3e3f99f5648f0aabd57c4788260256b3236c8cbfac3ddd6c517f935f731",
+          "candidate_inventories": [
+            {
+              "role": "baseline",
+              "repository": "brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility",
+              "revision": "e4d8a67ddb1f0b4c7605c5efcdc3c54e87e22b9f",
+              "inventory_sha256": "205cdd1e0b36dcaa545e551df9ca3eb88a6ebb385276236fc45a3f105c25b4e9",
+              "file_sha256": "45b02fb6217553ea899c285f19b4e7375cd5263098a7c0a58d2ab63fe4eefdc7"
+            },
+            {
+              "role": "challenger",
+              "repository": "brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility",
+              "revision": "97e85482f1e65a14a74c6743d05c4e23a4e2df86",
+              "inventory_sha256": "f731dd2d6d0328af996764418da9d612c0feec77d004eeb61e054f5e75d712bc",
+              "file_sha256": "660fe8326c9a4f614637ded930e851789004e13d30d1810a20c3077be76c1683"
+            }
+          ],
+          "score_calibration_sha256": "30ba89ed0e39c87800b6f8410b63c29f78655110e9948e1a9c6ac18f1858f2a2",
+          "budget_closure_sha256": "59ba6126bc8de79a14deda2ce435818a1e9081ff1c5150023cf8145ac168fd67",
+          "untouched_endpoint_sha256": "b31bd6cb18cd6c965685a8568a98bf723448093e31e0bb8609b5043dec2480fe",
+          "replay_receipt_sha256": "400bc0961b04906084ef3cbdc5be8f181b7942d58eb91dd03d514d527a9a3a44"
+        }
+      },
+      "parent": {
+        "repository": "Qwen/Qwen3-30B-A3B-Base",
+        "revision": "1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9"
+      },
+      "panel": {
+        "id": "wikitext-10x2048-untouched-rows-1-through-9",
+        "sha256": "6c509f3496d5a1fe6739c58ffa152c3d4202932f9d8a6514e55d17f8a4cfa741",
+        "positions": 18432
+      },
+      "backend": {
+        "attention": "sdpa",
+        "kv_cache": "not-used-offline-full-forward"
+      },
+      "evaluator": {
+        "metric": "mean-tokenwise-kl-bf16-teacher-to-reconstructed-student",
+        "implementation": "torch.float64 log_softmax independent recomputation"
+      },
+      "scope": {
+        "weights": "routed-expert-weight-elements",
+        "nonexpert": "source-BF16-fixed-nonexpert",
+        "comparison": "factory-union-vs-native-baseline-at-identical-frozen-bit-rates"
+      },
+      "rate": {
+        "value": 3.5,
+        "unit": "logical-bpw",
+        "scope": "routed-expert-weight-elements"
+      },
+      "value": {
+        "metric": "mean_kld",
+        "value": 0.04426673670347609
+      },
+      "secondary_metrics": {
+        "baseline_mean_kld": 0.04409549318018177,
+        "absolute_reduction": -0.00017124352329430756,
+        "relative_reduction": -0.0038834699635760294,
+        "rows_union_better": 5,
+        "row_count": 9
+      },
+      "evidence": {
+        "path": "https://huggingface.co/datasets/brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility/blob/a77141740749a53ede41d96115ba911f5b569f76/results/qwen3-30b-a3b-base/progressive-candidate-v1/factory-union-native-vs-progressive/report.json",
+        "evidence_sha256": "1a61541382f566c3a99ea925d34a5c91303f83b37ecbd0776ad176842d6dd003",
+        "report_sha256": "54d3ecb81e350158e809db427b9a189cc56486a1da69ee27823ffe26978c28ba",
+        "verification_sha256": "400bc0961b04906084ef3cbdc5be8f181b7942d58eb91dd03d514d527a9a3a44"
+      },
+      "status": {
+        "state": "independently-verified",
+        "detail": "Factory selection used row 0; the endpoint uses untouched rows 1 through 9 and was replayed independently in float64."
+      }
+    },
+    {
+      "schema": "shapleymcg.result-ledger-row.v1",
+      "id": "posttrained-turboderp-v001-carried-surplus-matched",
+      "method_profile": {
+        "allocation": "exllamav3-v0.0.1-carried-surplus-fused-projection-rule",
+        "candidate_factory": "published-turboderp-k3-k4-reconstructions",
+        "calibration": "turboderp-published-conversion",
+        "codec": "TurboDerp-EXL3-trellis",
+        "encoding": "published-k3-k4-reconstruction-pool"
+      },
+      "design": {
+        "kind": "matched-allocation-control",
+        "rate_selection": "frozen",
+        "factory_selection": "fixed",
+        "bindings": {
+          "allocation_plan_sha256": "c4cae0395a5581c888c8355bd7ece2f5ab2cf9d56a274f4186b20c0fe5de26f7",
+          "candidate_inventories": [],
+          "score_calibration_sha256": null,
+          "budget_closure_sha256": null,
+          "untouched_endpoint_sha256": null,
+          "replay_receipt_sha256": null
+        }
+      },
+      "parent": {
+        "repository": "Qwen/Qwen3-30B-A3B",
+        "revision": "4c446470ba0aec43e22ac1128f9ffd915f338ba3"
+      },
+      "panel": {
+        "id": "wikitext-10x2048",
+        "sha256": "f67b22af3930184864d12576796807b29552bda3f55dcaa7d6af1d8b262ef9fb",
+        "positions": 20480
+      },
+      "backend": {
+        "attention": "eager",
+        "kv_cache": "not-used-offline-full-forward"
+      },
+      "evaluator": {
+        "metric": "mean-tokenwise-kl-bf16-teacher-to-reconstructed-student",
+        "implementation": "saved-logit-float32-evaluator"
+      },
+      "scope": {
+        "weights": "routed-expert-weight-elements",
+        "nonexpert": "TurboDerp-K4-body-K6-head-source-BF16-router",
+        "comparison": "allocator-only-baseline-over-identical-published-TurboDerp-K3-K4-reconstructions"
+      },
+      "rate": {
+        "value": 3.5,
+        "unit": "logical-bpw",
+        "scope": "routed-expert-weight-elements"
+      },
+      "value": {
+        "metric": "mean_kld",
+        "value": 0.033941535180377104
+      },
+      "secondary_metrics": {
+        "top1_agreement": 0.931201171875,
+        "matched_shapleymcg_mean_kld": 0.029269076647285147,
+        "absolute_kld_reduction_of_shapleymcg": 0.0046724585330919595,
+        "relative_kld_reduction_of_shapleymcg": 0.13766196809486939,
+        "comparison_sha256": "85376441fc6279a3d17549921f310d1247ee39810bcbf7fe8e3e8c35f602bc65"
+      },
+      "evidence": {
+        "path": "results/qwen3-30b-a3b-posttrained/turboderp-v001-allocation-proof/comparison.json",
+        "evidence_sha256": "ea94c13ef44c7cfd2e67fe59b35475da6922b5aab7588942dffab07905c871f7",
+        "report_sha256": "09ca12b8c4b76ff9a49a157e034d0cb13d895b96f4af2702a67a15c842c0d4ac",
+        "verification_sha256": null
+      },
+      "status": {
+        "state": "source-sealed",
+        "detail": "Matched saved-logit allocator baseline over the same published K3/K4 candidate bytes. The checked-in bundle does not identify a separate independent logit-replay receipt."
+      }
+    },
+    {
+      "schema": "shapleymcg.result-ledger-row.v1",
+      "id": "posttrained-20k-turboderp-mcg-factory-union",
+      "method_profile": {
+        "allocation": "full-aumann-shapley-fisher-frozen-exact-3p5",
+        "candidate_factory": "published-turboderp-plus-mcg-whole-layer-union",
+        "calibration": "source-state-frozen-rate-layer-swap-selection",
+        "codec": "TurboDerp-EXL3-trellis-plus-MCG",
+        "encoding": "whole-layer-factory-selection-on-row-0"
+      },
+      "design": {
+        "kind": "frozen-rate-factory-diagnostic",
+        "rate_selection": "frozen",
+        "factory_selection": "selected",
+        "bindings": {
+          "allocation_plan_sha256": "51bf1caf86292968055a054b6b5afcdb36354fad05e1ede109303634fa7edc6e",
+          "candidate_inventories": [
+            {
+              "role": "baseline-published-turboderp-k3-k4",
+              "repository": "turboderp/Qwen3-30B-A3B-exl3",
+              "revision": "K3=45c353c522dedaf4fb68be60423d611b5ff71e26;K4=0b83e92c6d3b5a868ecd5a5fbb3bcc1920e388ef",
+              "inventory_sha256": "8b94921e364e499cdffa2ae9d2a015549814faa494b4930ed59bfe1a789dc7a4",
+              "file_sha256": "7e77be9577ce6598ca039e916ea73d416950215bf05593fd35c6f79e2fcc1fa3"
+            },
+            {
+              "role": "challenger-native-mcg",
+              "repository": "brandonmusic/shapleymcg-qwen3-30b-a3b-posttrained-reproducibility",
+              "revision": "2de2d5e87e3493739784eec74b1446991b910614",
+              "inventory_sha256": "eba3337ed2f5f43f3d15ebfb54836cb1fd46588ce1c368ee971ac733e2b14143",
+              "file_sha256": "e81d8a1ff9831ca6fa1c6cb0f2f35ca70075a7120863f5702b24c41c3d6c5cc1"
+            }
+          ],
+          "score_calibration_sha256": "5e1759c303514cbb99f4402d89af70830c8870def41971b94bc03c13e4a778b8",
+          "budget_closure_sha256": "62bfca1448fb038b04a50fba2d91f104efc0b78f72e636216f4ce69e8757a409",
+          "untouched_endpoint_sha256": "89afc270b3f59d8c5b4ce622d83be82549f4c5e6a90cedc8e0493959bd248ade",
+          "replay_receipt_sha256": "865d8f696b29cd5b84e51910fbf4fa4632082b44d63e67c973507d3c7dce3397"
+        }
+      },
+      "parent": {
+        "repository": "Qwen/Qwen3-30B-A3B",
+        "revision": "4c446470ba0aec43e22ac1128f9ffd915f338ba3"
+      },
+      "panel": {
+        "id": "wikitext-10x2048-untouched-rows-1-through-9",
+        "sha256": "f67b22af3930184864d12576796807b29552bda3f55dcaa7d6af1d8b262ef9fb",
+        "positions": 18432
+      },
+      "backend": {
+        "attention": "eager",
+        "kv_cache": "not-used-offline-full-forward"
+      },
+      "evaluator": {
+        "metric": "mean-tokenwise-kl-bf16-teacher-to-reconstructed-student",
+        "implementation": "torch.float64-log-softmax-independent-recomputation"
+      },
+      "scope": {
+        "weights": "routed-expert-weight-elements",
+        "nonexpert": "TurboDerp-K4-body-K6-head-source-BF16-router",
+        "comparison": "frozen-rate-whole-layer-factory-union-vs-published-TurboDerp-candidates"
+      },
+      "rate": {
+        "value": 3.5,
+        "unit": "logical-bpw",
+        "scope": "routed-expert-weight-elements"
+      },
+      "value": {
+        "metric": "mean_kld",
+        "value": 0.02936814480556666
+      },
+      "secondary_metrics": {
+        "baseline_mean_kld": 0.030283841053315566,
+        "absolute_reduction": 0.0009156962477489026,
+        "relative_reduction": 0.030237123690379737,
+        "paired_block_95_interval_for_baseline_minus_union": [
+          -0.00011704741100369084,
+          0.0019815815832019573
+        ],
+        "candidate_source_inventory_path": "results/qwen3-30b-a3b-posttrained/candidate-factory-union-v1/candidate-source-inventories.json",
+        "rows_union_better": 5,
+        "row_count": 9
+      },
+      "evidence": {
+        "path": "results/qwen3-30b-a3b-posttrained/candidate-factory-union-v1/summary.json",
+        "evidence_sha256": "06efce93d174df4e413579e9c740423777def001b9b2bd2ebf76fda8e56976a3",
+        "report_sha256": "1b8897431f07768405afc1d4d98d970acdec84733d2e3bacc49da301978492a1",
+        "verification_sha256": "865d8f696b29cd5b84e51910fbf4fa4632082b44d63e67c973507d3c7dce3397"
+      },
+      "status": {
+        "state": "independently-verified",
+        "detail": "Rates were frozen from the causal allocation; factory selection used row 0; rows 1 through 9 were untouched and independently recomputed. This is not joint factory/rate evidence."
+      }
+    }
+  ]
+}

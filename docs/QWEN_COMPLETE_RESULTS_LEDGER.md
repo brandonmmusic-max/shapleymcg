@@ -1,8 +1,16 @@
 # Qwen3-30B-A3B complete result ledger
 
+The concise human-readable result index is [`RESULTS.md`](../RESULTS.md). This
+longer ledger preserves exact experiment scope, comparison qualifications,
+seals, and publication receipts.
+
 This is the human-readable index of every headline KLD result produced by the
-Qwen/B200 campaign. The machine ledger in
-`results/qwen-complete-results-ledger.json` is authoritative for exact seals.
+Qwen/B200 campaign. The normalized machine index is
+[`results/RESULTS_LEDGER.json`](../results/RESULTS_LEDGER.json); the older
+[`results/qwen-complete-results-ledger.json`](../results/qwen-complete-results-ledger.json)
+is its historical migration source. The cited sealed reports, independent
+replays, comparison bundles, and immutable Hub revisions remain the evidence
+authority for individual claims.
 Lower KLD is better. “Expert BPW” covers routed-expert weight elements only;
 dense attention, embedding, router, normalization, and head scope are stated
 separately.
@@ -50,6 +58,36 @@ The score-blind sample SD was `0.0107375700273`, with range
 allocation. The Hill row is a reconstruction, not a strict paper reproduction:
 the author token panel was unavailable, the parent/scope differ, and this run
 uses BF16 replay rather than the paper's W4A4 NVFP4 execution.
+
+## Base parent: frozen-rate progressive factory diagnostic
+
+This experiment froze every per-matrix K3/K4 choice from the validated causal
+allocation. Selection row 0 chose whole-layer source-state or progressive-state
+MCG reconstructions. Rows 1 through 9 were excluded from every decision.
+
+| Arm | Selection row 0 mean KLD | Untouched rows 1–9 mean KLD | Rows better |
+|---|---:|---:|---:|
+| Native source-state MCG | 0.0560775886472 | **0.0440954931802** | 4/9 |
+| Selected native/progressive union | **0.0474489037354** | 0.0442667367035 | 5/9 |
+
+Selection admitted progressive layers 20, 34, 23, 18, 25, 37, 13, 14, 24,
+and 39. Its 15.387% selection-row improvement did not generalize in the mean:
+the union was `0.000171243523294` (0.388%) worse on untouched rows. The paired
+interval for native minus union was
+`[-0.00103568513587, 0.000737749009880]`, crossing zero.
+
+This is a completed negative/directional factory diagnostic. It did not change
+rates, did not run the new joint factory/rate composition, and supports no
+joint-allocation claim.
+
+Report seal:
+`54d3ecb81e350158e809db427b9a189cc56486a1da69ee27823ffe26978c28ba`.
+Independent Torch float64 replay seal:
+`400bc0961b04906084ef3cbdc5be8f181b7942d58eb91dd03d514d527a9a3a44`.
+The 139-file, 26,158,691,040-byte tree is remotely verified at
+[Hugging Face revision `a7714174`](https://huggingface.co/datasets/brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility/tree/a77141740749a53ede41d96115ba911f5b569f76/results/qwen3-30b-a3b-base/progressive-candidate-v1),
+with manifest seal
+`51793e22a35261ebddc1f9fb300c900947c12d07f64b01906abf8f82f1d34b96`.
 
 ## Post-trained parent: predecessor allocation and codec controls
 
@@ -174,9 +212,12 @@ bootstrap interval for absolute KLD reduction is
 `[0.0035278602, 0.0059290927]`. Comparison seal:
 `85376441fc6279a3d17549921f310d1247ee39810bcbf7fe8e3e8c35f602bc65`.
 
-This establishes allocation-rule superiority on common reconstructed
-candidate bytes. It remains distinct from a whole-pipeline comparison against
-a native v0.0.1 3.5 checkpoint, which TurboDerp did not publish.
+This is strong matched evidence for an allocation-rule advantage on common
+reconstructed candidate bytes. The checked-in bundle seals reports and stored
+token-KLD vectors, but it does not yet attach the separate logit-level replay
+receipt required by the repository's strict promotion protocol. It remains
+distinct from a whole-pipeline comparison against a native v0.0.1 3.5
+checkpoint, which TurboDerp did not publish.
 
 ### Candidate-factory union at the frozen causal allocation
 
@@ -236,17 +277,21 @@ only.
 - Established: the full causal allocation improves the unchanged TurboDerp
   K3/K4 candidate-pool arm by 3.322359%, so the allocation signal transfers to
   a second reconstruction pool.
-- Established: over that same published K3/K4 candidate pool and exact expert
-  rate, full ShapleyMCG beats TurboDerp v0.0.1's own carried-surplus allocation
-  by 13.766197%, with all 10 rows favorable and a positive row-block bootstrap
-  interval.
+- Measured matched evidence: over that same published K3/K4 candidate pool and
+  exact expert rate, full ShapleyMCG is 13.766197% lower than TurboDerp
+  v0.0.1's carried-surplus allocation, with all 10 rows favorable and a
+  positive row-block bootstrap interval. Strict promotion awaits the
+  independent logit-level replay receipt.
 - Established: the raw five-node attribution leaves a stable material
   remainder (29.77% post-trained; 30.42% Base), so exact end-to-end anchors are
   necessary and reconciliation must remain labeled accounting rather than raw
   additivity.
+- Established: the Base frozen-rate native/progressive whole-layer selector
+  did not improve untouched mean KLD; its interval crossed zero.
 - Not established: strict superiority to Hill et al., a whole-pipeline win
   over a native TurboDerp 3.5 model (none was published for this checkpoint),
-  codec-only superiority, or packed-runtime quality/parity.
+  codec-only superiority, packed-runtime quality/parity, or a joint
+  candidate-factory/rate result.
 - Never measured: an interpolated K3/K4 midpoint is not a naive 3.5 result.
 
 Full logits, tokenwise KLD, candidate receipts, and hashes are stored in the two

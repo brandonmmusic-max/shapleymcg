@@ -1,10 +1,21 @@
 # ShapleyMCG: complete method specification
 
+For a plain-language, implementation-linked walkthrough, start with the
+[repository README](../README.md). This document is the shorter normative
+specification used to decide whether a run may be labeled full ShapleyMCG.
+
 This document defines the full ShapleyMCG method and distinguishes it from the
 historical Hessian/router allocation used in the first Qwen controls. A result
 may be labeled **full ShapleyMCG** only when every stage below is executed and
 its identities are sealed. Fixed-Hadamard MCG encoding plus diagonal routed-p2
 allocation is the **predecessor pipeline**, not the full method.
+
+The measured/current method uses one frozen candidate inventory at a time:
+native source-state MCG candidates or a separately fixed published EXL3 pool.
+The repository also contains generic model-neutral primitives for a future
+joint candidate-factory/rate allocation. Those primitives have not produced a
+sealed real-model endpoint and are not included in the present “full
+ShapleyMCG” result label.
 
 ## 1. Target and experimental boundaries
 
@@ -17,6 +28,7 @@ candidate inventory are fixed within a comparison.
 Documents are separated by role:
 
 - `fit`: Hessian/covariance, routing, scale, transform, and sketch fitting;
+- `conditional_fit`: decoded gate/up state used to fit conditional-down candidates;
 - `selection`: candidate and allocation decisions;
 - `confirmation`: prospective sign, ranking, closure, and regret checks; and
 - `final`: untouched KLD and downstream validation.
@@ -135,7 +147,27 @@ Expanded BF16 reconstructed-weight evaluation is not packed-runtime
 qualification. CUDA graphs, native BTX/EXL3 readers, KV-cache formats, and
 serving throughput require separate parity and runtime gates.
 
-## 8. Names used in result ledgers
+## 8. Optional candidate-factory extension
+
+An optional factory may add exact reconstruction alternatives to the mandatory
+native candidate inventory. Every alternative must bind a common source,
+runtime-format identity, shared-transform domain, exact private/shared byte
+cost, and common calibrated score. The allocator must select compatible
+`(factory, rate)` choices under one exact byte budget, then reconstruct and
+evaluate the result on untouched final tokens.
+
+The completed Qwen factory experiments are narrower: they freeze the validated
+per-matrix K3/K4 rates and select reconstruction source at whole-layer
+granularity. Those results may be called **frozen-rate factory diagnostics**.
+They must not be called joint factory/rate allocations.
+
+The joint composition library primitives are experimental and fail-closed, but
+there is no qualified Qwen composition command and they have not passed a
+sealed Qwen endpoint, independent replay, or publication gate.
+Until they do, they are unvalidated future work and do not alter the validated
+method or its claims.
+
+## 9. Names used in result ledgers
 
 - **Predecessor allocation**: fixed-Hadamard/MCG candidates selected by minimum
   diagonal routed-p2 Hessian/router damage. It may be a useful control, but it
@@ -150,8 +182,13 @@ serving throughput require separate parity and runtime gates.
   allocator on a second fixed candidate pool; it does not isolate the codec or
   calibration stack. Credit belongs to turboderp and the ExLlamaV3
   contributors.
+- **Frozen-rate factory diagnostic**: per-matrix rates and the surrounding
+  model remain fixed while selection-only rows choose whole-layer
+  reconstruction sources. It is not a joint factory/rate result.
+- **Joint factory/rate allocation**: a coupled exact-byte selection across
+  qualified factories and rates. No current result carries this label.
 
-## 9. Claims that the present evidence can support
+## 10. Claims that the present evidence can support
 
 A full-method improvement claim requires a matched predecessor-versus-causal
 comparison. A codec superiority claim requires the same allocation, parent,
@@ -159,9 +196,11 @@ panel, non-expert scope, and evaluator with only the codec changed. A comparison
 with Hill et al. must be called reconstructed unless their exact token panel,
 parent, quantized scope, and W4A4 arithmetic are reproduced. Interpolation
 between K3 and K4 is descriptive and is never reported as a measured 3.5-bpw
-result.
+result. A joint factory/rate claim additionally requires common-score
+calibration outside the final rows, exact compatible allocation, reconstruction,
+untouched KLD, and independent replay.
 
-## 10. Attribution
+## 11. Attribution
 
 ShapleyMCG combines original integration and experiment engineering with prior
 work. The direct modern quantization precedent for Aumann-Shapley/additivity is

@@ -7,7 +7,8 @@ set -euo pipefail
 
 RUN_ROOT=${RUN_ROOT:-/workspace/shapleymcg-progressive-v1}
 BASE_ROOT=${BASE_ROOT:-/qwen-shapleymcg-run}
-CODE_ROOT=${CODE_ROOT:-${BASE_ROOT}/code-next}
+SCRIPT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+CODE_ROOT=${CODE_ROOT:-${SCRIPT_ROOT}}
 PYTHON=${PYTHON:-/workspace/quant-venv/bin/python}
 MODEL=${MODEL:-/models/Qwen3-30B-A3B-Base}
 SOURCE_RECEIPT=${SOURCE_RECEIPT:-${BASE_ROOT}/artifacts/qwen-source-receipt.json}
@@ -17,19 +18,54 @@ EXTENSION=${EXTENSION:-${BASE_ROOT}/encoding-site/exllamav3_ext.cpython-311-x86_
 KLD_WINDOW=${KLD_WINDOW:-/artifacts/shapleymcg/qwen3-30b-a3b-v1/kld-window}
 TEACHER=${TEACHER:-/artifacts/shapleymcg/qwen3-30b-a3b-v1/teacher-kld/window-0000.safetensors}
 LOG_ROOT=${LOG_ROOT:-${RUN_ROOT}/logs}
+ACTION=${ACTION:-plan}
+CAPTURE_MODE=${CAPTURE_MODE:-require}
+SEALED_CORPUS=${SEALED_CORPUS:-}
+CAPTURE_RECEIPT=${CAPTURE_RECEIPT:-${RUN_ROOT}/calibration-capture/calibration-capture-fit-receipt.json}
+CAPTURE_DEVICE_MAP=${CAPTURE_DEVICE_MAP:-auto}
+CAPTURE_ATTENTION_BACKEND=${CAPTURE_ATTENTION_BACKEND:-eager}
+
+case "${ACTION}" in
+    plan|execute) ;;
+    *) printf 'ACTION must be plan or execute\n' >&2; exit 2 ;;
+esac
+case "${CAPTURE_MODE}" in
+    launch|require) ;;
+    *) printf 'CAPTURE_MODE must be launch or require\n' >&2; exit 2 ;;
+esac
+
+if [[ "${ACTION}" == plan ]]; then
+    printf '{"action":"plan","capture_mode":"%s","capture_receipt":"%s","code_root":"%s","publication":false,"run_root":"%s"}\n' \
+        "${CAPTURE_MODE}" "${CAPTURE_RECEIPT}" "${CODE_ROOT}" "${RUN_ROOT}"
+    exit 0
+fi
 
 export PYTHONPATH="${CODE_ROOT}/src:${BASE_ROOT}/encoding-site${PYTHONPATH:+:${PYTHONPATH}}"
 mkdir -p "${LOG_ROOT}"
 
-capture_receipt="${RUN_ROOT}/calibration-capture/calibration-capture-fit-receipt.json"
-while ! test -s "${capture_receipt}"; do
-    capture_pid_file="${LOG_ROOT}/capture-fit.pid"
-    if test -s "${capture_pid_file}" && ! kill -0 "$(cat "${capture_pid_file}")" 2>/dev/null; then
-        printf 'capture process exited without its sealed receipt\n' >&2
+if ! test -s "${CAPTURE_RECEIPT}"; then
+    if [[ "${CAPTURE_MODE}" == require ]]; then
+        printf 'required capture receipt is absent: %s\n' "${CAPTURE_RECEIPT}" >&2
         exit 1
     fi
-    sleep 30
-done
+    if [[ -z "${SEALED_CORPUS}" ]]; then
+        printf 'SEALED_CORPUS is required when CAPTURE_MODE=launch\n' >&2
+        exit 2
+    fi
+    capture_args=(
+        "${PYTHON}" "${CODE_ROOT}/scripts/run_qwen_calibration_capture.py"
+        --source-checkpoint "${MODEL}"
+        --sealed-corpus "${SEALED_CORPUS}"
+        --output-dir "${RUN_ROOT}/calibration-capture"
+        --model-revision "${MODEL_REVISION:-1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9}"
+        --device-map "${CAPTURE_DEVICE_MAP}"
+        --attention-backend "${CAPTURE_ATTENTION_BACKEND}"
+        --purposes fit
+        --execute
+    )
+    "${capture_args[@]}" > "${LOG_ROOT}/capture-fit.log" 2>&1
+fi
+test -s "${CAPTURE_RECEIPT}"
 
 # The independent candidate-factory union uses the second B200 while capture
 # runs on the first.  Do not start two-GPU fit waves until that orthogonal arm

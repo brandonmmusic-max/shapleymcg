@@ -1,0 +1,24 @@
+{
+  "schema": "shapleymcg.candidate-source-inventories.v1",
+  "native_mcg": {
+    "role": "challenger-native-mcg",
+    "repository": "brandonmusic/shapleymcg-qwen3-30b-a3b-posttrained-reproducibility",
+    "revision": "2de2d5e87e3493739784eec74b1446991b910614",
+    "path": "full-causal-v1/attribution-stage/candidate-inventory.json",
+    "source_inventory_sha256": "eba3337ed2f5f43f3d15ebfb54836cb1fd46588ce1c368ee971ac733e2b14143",
+    "source_file_sha256": "e81d8a1ff9831ca6fa1c6cb0f2f35ca70075a7120863f5702b24c41c3d6c5cc1"
+  },
+  "turboderp_k3_k4": {
+    "role": "baseline-published-turboderp-k3-k4",
+    "repository": "turboderp/Qwen3-30B-A3B-exl3",
+    "k3_revision": "45c353c522dedaf4fb68be60423d611b5ff71e26",
+    "k3_bits": 3.0,
+    "k3_quantization_config_sha256": "e0d45e66870f413ff73762566071e3e50c55f0fc8648beac1f709e0c593a67c2",
+    "k4_revision": "0b83e92c6d3b5a868ecd5a5fbb3bcc1920e388ef",
+    "k4_bits": 4.0,
+    "k4_quantization_config_sha256": "8d658fae9ba89366c3b9a6bc9307de3a39035c4e361db1cd32d9e770f97ac54f",
+    "head_bits": 6,
+    "factory_granularity": "whole-routed-expert-layer",
+    "selection_rate": "9216-K3-plus-9216-K4-routed-expert-matrices"
+  }
+}

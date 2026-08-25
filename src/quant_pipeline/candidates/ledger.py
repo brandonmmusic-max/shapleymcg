@@ -203,6 +203,7 @@ class ExpertCandidateInput:
     heldout_batches: Sequence[RoutedExpertBatch] | Callable[[], Iterable[RoutedExpertBatch]]
     k5_screen: Mapping[tuple[int, int, int], K5Decision]
     conditional_down_fit_batches: Sequence[ConditionalDownFitBatch] | Callable[[], Iterable[ConditionalDownFitBatch]] | None = None
+    proposal_score_candidate_identity: Mapping[str, Mapping[str, Any]] | None = None
 
     @property
     def unit_id(self) -> str:
@@ -494,6 +495,7 @@ def build_expert_candidate_input(
     searched_transform: Any | None = None,
     allow_fixed_transform_baseline: bool = False,
     conditional_down_fit_batches: Sequence[ConditionalDownFitBatch] | Callable[[], Iterable[ConditionalDownFitBatch]] | None = None,
+    proposal_score_candidate_identity: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> ExpertCandidateInput:
     """Create exact codec inputs directly from verified fitter outputs.
 
@@ -675,6 +677,7 @@ def build_expert_candidate_input(
         heldout_batches=heldout_batches,
         k5_screen=k5_screen,
         conditional_down_fit_batches=conditional_down_fit_batches,
+        proposal_score_candidate_identity=proposal_score_candidate_identity,
     )
 
 
@@ -1033,6 +1036,20 @@ def _validate_expert_input(item: ExpertCandidateInput, competitive: bool) -> Non
         raise ValueError("decoded gate/up conditional down fitting requires a disjoint calibration stream")
     if set(item.k5_screen) != set(all_k5_triplets()):
         raise ValueError("K5 screening must explicitly decide all 19 K5-containing triplets")
+    if item.proposal_score_candidate_identity is not None:
+        expected = {"gate_proj", "up_proj", "down_proj.g4u4"}
+        if set(item.proposal_score_candidate_identity) != expected:
+            raise ValueError("proposal-score candidate identity must cover exact conditional uniform-K4 bytes")
+        for projection, row in item.proposal_score_candidate_identity.items():
+            if not isinstance(row, Mapping) or set(row) != {
+                "bits", "packed_sha256", "reconstruction_deployed_fp16_sha256",
+                "reconstruction_hf_sha256",
+            }:
+                raise ValueError(f"proposal-score candidate identity is malformed for {projection}")
+            if row["bits"] != 4:
+                raise ValueError("proposal-score candidate identity must bind K4")
+            for key in ("packed_sha256", "reconstruction_deployed_fp16_sha256", "reconstruction_hf_sha256"):
+                _require_hash(row[key], f"proposal-score {projection} {key}")
     source = item.source.as_mapping()
     gate_shape, up_shape, down_shape = (_shape(source[name]) for name in PROJECTIONS)
     if len(gate_shape) != 2 or up_shape != gate_shape:
@@ -1080,6 +1097,10 @@ def _validate_expert_input(item: ExpertCandidateInput, competitive: bool) -> Non
         if not batch.batch_id:
             raise ValueError("held-out batch_id must be non-empty")
         batch_identity = dict(batch.identity or {})
+        if batch_identity.get("role") != "selection":
+            raise ValueError(
+                f"held-out batch {batch.batch_id} must come from the selection role"
+            )
         declared_layer = batch_identity.get("layer")
         declared_expert = batch_identity.get("expert")
         if (
@@ -1227,6 +1248,10 @@ def _validate_expert_input(item: ExpertCandidateInput, competitive: bool) -> Non
                 f"conditional down fit batch {batch.batch_id} declared route weights do not match expert {item.expert}"
             )
         identity = dict(batch.identity or {})
+        if identity.get("role") != "conditional_fit":
+            raise ValueError(
+                f"conditional down fit batch {batch.batch_id} must come from conditional_fit, not confirmation"
+            )
         down_fit_documents.add(
             _require_hash(identity.get("document_sha256"), "conditional down fit document identity")
         )
@@ -1317,6 +1342,11 @@ def _input_fingerprint(
         "fitted": fitted,
         "heldout_batches": batches,
         "conditional_down_fit_batches": down_fit_batches,
+        "proposal_score_candidate_identity": (
+            None
+            if item.proposal_score_candidate_identity is None
+            else _json_value(dict(item.proposal_score_candidate_identity))
+        ),
         "objective_arm": objective_arm,
         "expert_function_compute_dtype": expert_compute_dtype,
         "backend_attestation_sha256": _hash_json(attestation),
@@ -2034,6 +2064,29 @@ def validate_candidate_record(
         raise ValueError("candidate physical deployment byte accounting is stale")
     if record.get("payload_bytes") != payload or record.get("shared_layer_payload_bytes") != shared_bytes or record.get("payload_sha256") != _hash_json(identity):
         raise ValueError("candidate payload aggregate mismatch")
+    proposal_identity = record.get("scoring_inputs", {}).get("proposal_score_candidate_identity")
+    if triplet == (4, 4, 4) and proposal_identity is not None:
+        expected_names = {
+            "gate_proj": "gate_proj",
+            "up_proj": "up_proj",
+            "down_proj.g4u4": "down_proj",
+        }
+        if set(proposal_identity) != set(expected_names):
+            raise ValueError("uniform-K4 proposal-score candidate identity is incomplete")
+        for score_name, projection in expected_names.items():
+            expected = proposal_identity[score_name]
+            observed = projections[projection]
+            if (
+                expected.get("bits") != 4
+                or expected.get("packed_sha256") != observed["packed"]["codec_sha256"]
+                or expected.get("reconstruction_deployed_fp16_sha256")
+                != observed["reconstruction_deployed_fp16_sha256"]
+                or expected.get("reconstruction_hf_sha256")
+                != observed["reconstruction_hf"]["sha256"]
+            ):
+                raise ValueError(
+                    f"uniform-K4 canonical ledger bytes differ from proposal scoring for {score_name}"
+                )
     metrics = record.get("metrics")
     if not isinstance(metrics, dict):
         raise ValueError("candidate metrics are missing")

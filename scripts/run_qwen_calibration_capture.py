@@ -80,7 +80,7 @@ def main() -> int:
     capture_specs = {
         "fit": {"role": "fit", "fisher_rank": 0},
         "heldout": {"role": "selection", "fisher_rank": args.fisher_rank},
-        "conditional_down": {"role": "confirmation", "fisher_rank": 0},
+        "conditional_down": {"role": "conditional_fit", "fisher_rank": 0},
     }
     purposes = tuple(item.strip() for item in args.purposes.split(",") if item.strip())
     if not purposes or len(set(purposes)) != len(purposes) or any(item not in capture_specs for item in purposes):

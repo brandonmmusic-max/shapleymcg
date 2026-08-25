@@ -40,6 +40,7 @@ from ..calibration.fitter import (
 )
 from ..calibration.qwen_capture import (
     capture_roles_from_local_bf16,
+    qwen_moe_layers,
     verify_capture_chunk,
     verify_capture_manifest,
 )
@@ -62,7 +63,12 @@ from ..normalization.artifact_v31 import (
     PinnedGSSResult,
     make_gss_receipt,
 )
-from ..scoring.attribution import aumann_shapley, split_layer_damage
+from ..scoring.attribution import (
+    aumann_shapley,
+    reconcile_layer_components_for_allocation,
+    reconcile_signed_completeness,
+    split_layer_damage,
+)
 from .qwen_adapter import QwenCampaignServices
 from .qwen_attribution import (
     persist_provisional_winner_deltas,
@@ -74,7 +80,7 @@ from .qwen_attribution import (
 SERVICE_SCHEMA = "quant-pipeline.qwen-concrete-services.v1"
 CAPTURE_SERVICE_SCHEMA = "quant-pipeline.qwen-service-capture.v1"
 FIT_MANIFEST_SCHEMA = "quant-pipeline.qwen-service-fit.v1"
-ATTRIBUTION_SCHEMA = "quant-pipeline.qwen-attribution.v1"
+ATTRIBUTION_SCHEMA = "quant-pipeline.qwen-attribution.v2"
 ALLOCATION_SCHEMA = "quant-pipeline.qwen-dual-arm-allocation.v1"
 _HASH = re.compile(r"[0-9a-f]{64}")
 _REVISION = re.compile(r"[0-9a-f]{40}")
@@ -97,6 +103,79 @@ def _validate_allocation_document(allocation: Mapping[str, Any]) -> None:
     seal = allocation.get("allocation_sha256")
     if seal != _hash_json({key: value for key, value in allocation.items() if key != "allocation_sha256"}):
         raise ValueError("allocation seal mismatch")
+
+
+def _arm_choice_identity(arm: Mapping[str, Any]) -> tuple[tuple[str, str, str], ...]:
+    rows = arm.get("choices")
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("allocation arm must contain selected choices")
+    identity = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise ValueError("allocation arm choice must be an object")
+        unit_id = row.get("unit_id")
+        choice_id = row.get("choice_id")
+        record = row.get("candidate_record_sha256")
+        if not isinstance(unit_id, str) or not unit_id or not isinstance(choice_id, str) or not choice_id:
+            raise ValueError("allocation arm choice lacks unit/choice identity")
+        identity.append((unit_id, choice_id, _require_hash(record, "allocation arm candidate record")))
+    identity.sort()
+    if len({row[0] for row in identity}) != len(identity):
+        raise ValueError("allocation arm selects a unit more than once")
+    return tuple(identity)
+
+
+def _requested_allocation_arm(
+    allocation: Mapping[str, Any],
+    config: Mapping[str, Any],
+) -> tuple[str, Mapping[str, Any]]:
+    """Resolve the arm that may be installed, failing closed on rate drift.
+
+    The unconstrained research optimizer and the fused-runtime legality filter
+    answer different questions.  A mixed exact-rate research result must never
+    be silently replaced by a lower-rate runtime-qualified result merely
+    because the latter is the only arm the current fused kernel accepts.
+    """
+
+    configured = config.get("requested_allocation_arm")
+    declared = allocation.get("requested_allocation_arm")
+    if configured is None and declared is None:
+        # Compatibility for explicitly non-production fixtures and historical
+        # sealed documents.  The shipped production config names its arm.
+        name = "serving_arm"
+    else:
+        name = str(configured if configured is not None else declared)
+        if declared is not None and str(declared) != name:
+            raise ValueError("sealed allocation requested arm differs from runtime configuration")
+    if name not in {"research_arm", "runtime_qualified_arm", "serving_arm"}:
+        raise ValueError("requested_allocation_arm must name research_arm or runtime_qualified_arm")
+    arm = allocation.get(name)
+    if not isinstance(arm, Mapping):
+        raise ValueError(f"allocation lacks requested {name}")
+    selected_cost = arm.get("selected_cost")
+    if not isinstance(selected_cost, Mapping):
+        raise ValueError(f"requested {name} lacks reconciled selected_cost")
+    allocated = int(selected_cost.get("allocated_payload_bytes", -1))
+    if allocated != int(arm.get("stored_bytes", allocated)):
+        raise ValueError(f"requested {name} stored bytes differ from selected cost")
+    if bool(config.get("require_exact_payload_budget", False)):
+        budget_value = config.get("byte_budget", config.get("exact_payload_byte_budget"))
+        if isinstance(budget_value, bool) or not isinstance(budget_value, int):
+            raise ValueError("exact runtime arm requires an integer exact payload byte budget")
+        if allocated != budget_value:
+            raise RuntimeError(
+                f"requested {name} uses {allocated} bytes, not the exact requested {budget_value} bytes"
+            )
+    if bool(config.get("require_fused_btx", True)) and name == "research_arm":
+        runtime = allocation.get("runtime_qualified_arm")
+        if not isinstance(runtime, Mapping):
+            raise RuntimeError("fused BTX installation requires an explicit runtime-qualified arm")
+        if _arm_choice_identity(arm) != _arm_choice_identity(runtime):
+            raise RuntimeError(
+                "the requested research allocation is not fused-BTX runtime-qualified; "
+                "refusing to substitute the runtime arm or collapse its exact mixed rate"
+            )
+    return name, arm
 
 
 def _output(context: Mapping[str, Any]) -> Path:
@@ -300,8 +379,18 @@ class QwenRouteCaptureService:
         roles = {
             "fit": str(self.config.get("fit_capture_role", "fit")),
             "heldout": str(self.config.get("heldout_capture_role", "selection")),
-            "conditional_down": str(self.config.get("conditional_down_capture_role", "confirmation")),
+            "conditional_down": str(self.config.get("conditional_down_capture_role", "conditional_fit")),
         }
+        required_roles = {
+            "fit": "fit",
+            "heldout": "selection",
+            "conditional_down": "conditional_fit",
+        }
+        if any(roles[purpose] != role for purpose, role in required_roles.items()):
+            raise ValueError(
+                "candidate capture roles must be fit, selection, and conditional_fit; "
+                "confirmation is prospective-only"
+            )
         supplemental = self.config.get("supplemental_capture_role")
         if supplemental is not None:
             roles["supplemental"] = str(supplemental)
@@ -859,7 +948,17 @@ class QwenFitterService:
         }
         fit_manifest["fit_sha256"] = _hash_json(fit_manifest)
         write_json(output / "fit-manifest.json", fit_manifest)
-        return {"fit_manifest_file": "fit-manifest.json", "transient_files": []}
+        transient_files = sorted(
+            path.relative_to(output).as_posix()
+            for path in output.rglob("*")
+            if path.is_file() and path.name != "fit-manifest.json"
+        )
+        if not transient_files:
+            raise RuntimeError("fitter produced no retireable covariance/vector artifacts")
+        return {
+            "fit_manifest_file": "fit-manifest.json",
+            "transient_files": transient_files,
+        }
 
 
 class QwenCodecService:
@@ -907,7 +1006,7 @@ class QwenCodecService:
         allocation = json.loads(_result_path(allocation_root, "allocation_file").read_text())
         _validate_allocation_document(allocation)
         layer = int(context["layer"])
-        serving = allocation.get("serving_arm", {})
+        requested_arm_name, serving = _requested_allocation_arm(allocation, self.config)
         selected_rows = [
             dict(row)
             for row in serving.get("choices", ())
@@ -920,17 +1019,17 @@ class QwenCodecService:
         records = {row["candidate_id"]: row for row in ledger["candidates"] if int(row["layer"]) == layer}
         selected_records = [records[choice] for _unit, choice in sorted(selected_ids.items())]
         if not selected_records:
-            raise ValueError(f"serving allocation has no selected candidates for layer {layer}")
+            raise ValueError(f"requested {requested_arm_name} has no selected candidates for layer {layer}")
         selected_cost = serving.get("selected_cost")
         if not isinstance(selected_cost, Mapping):
-            raise ValueError("serving allocation lacks its reconciled selected_cost")
+            raise ValueError(f"requested {requested_arm_name} lacks its reconciled selected_cost")
         layer_costs = [row for row in selected_cost.get("selected_layer_costs", ()) if int(row["layer"]) == layer]
         if len(layer_costs) != 1:
-            raise ValueError(f"serving selected_cost lacks exactly one layer {layer} row")
+            raise ValueError(f"requested {requested_arm_name} selected_cost lacks exactly one layer {layer} row")
         expected_layer_cost = layer_costs[0]
         selected_hashes = sorted(str(row.get("candidate_record_sha256")) for row in selected_rows)
         if selected_hashes != expected_layer_cost["selected_candidate_record_sha256"]:
-            raise ValueError("serving layer cost hashes differ from the exact selected allocation choices")
+            raise ValueError("requested arm layer cost hashes differ from the exact selected allocation choices")
         store_root = candidate_root / "journal" / "payloads"
         choices = []
         for record in selected_records:
@@ -1034,7 +1133,10 @@ class QwenAllocatorService:
         direct_by_unit: dict[str, float] = {}
         for layer_row in attribution.get("layers", ()):
             layer = int(layer_row["layer_index"])
-            for expert, direct in enumerate(layer_row["expert_direct"]):
+            allocation_scores = layer_row.get("expert_allocation_score_reconciled")
+            if not isinstance(allocation_scores, list):
+                raise ValueError("attribution lacks explicitly redistributed expert allocation scores")
+            for expert, direct in enumerate(allocation_scores):
                 direct_by_unit[f"L{layer}.E{expert}"] = float(direct)
         by_unit: dict[str, list[dict[str, Any]]] = {}
         for record in records:
@@ -1059,7 +1161,7 @@ class QwenAllocatorService:
                 damage_overrides[candidate_id] = value + offset
             calibration_rows.append({
                 "unit_id": unit_id,
-                "expert_direct": direct,
+                "expert_allocation_score_reconciled": direct,
                 "provisional_candidate_id": anchor["candidate_id"],
                 "provisional_proxy_damage": anchor_proxy,
                 "signed_scale": scale,
@@ -1104,6 +1206,8 @@ class QwenAllocatorService:
 
         offset_by_unit = {str(row["unit_id"]): float(row["nonnegative_unit_offset"]) for row in calibration_rows}
 
+        records_by_id = {str(row["candidate_id"]): row for row in records}
+
         def arm(value: Any, *, shifted: bool) -> dict[str, Any]:
             allocation = value.allocation
             choices = [{
@@ -1112,6 +1216,7 @@ class QwenAllocatorService:
                 "stored_bytes": row.stored_bytes,
                 "predicted_damage": row.predicted_damage,
                 "candidate_record_sha256": row.metadata["record_sha256"],
+                "bit_triplet": list(records_by_id[row.choice_id]["bit_triplet"]),
             } for row in allocation.choices]
             total_offset = sum(offset_by_unit[row["unit_id"]] for row in choices) if shifted else 0.0
             return {
@@ -1125,6 +1230,11 @@ class QwenAllocatorService:
                 "selected_cost": dict(value.selected_cost),
             }
 
+        research_arm = arm(research, shifted=True)
+        runtime_arm = arm(serving, shifted=True)
+        requested_arm = str(self.config.get("requested_allocation_arm", "research_arm"))
+        if requested_arm not in {"research_arm", "runtime_qualified_arm"}:
+            raise ValueError("requested_allocation_arm must name research_arm or runtime_qualified_arm")
         body = {
             "schema": ALLOCATION_SCHEMA,
             "ledger_sha256": ledger["ledger_sha256"],
@@ -1132,8 +1242,20 @@ class QwenAllocatorService:
             "attribution_sha256": seal,
             "byte_budget": budget,
             "proxy_control_arm": arm(proxy_control, shifted=False),
-            "research_arm": arm(research, shifted=True),
-            "serving_arm": arm(serving, shifted=True),
+            "research_arm": research_arm,
+            "runtime_qualified_arm": runtime_arm,
+            # Historical readers used serving_arm.  Retain the byte-identical
+            # alias while making its meaning explicit and never selecting it
+            # implicitly in the shipped production configuration.
+            "serving_arm": runtime_arm,
+            "requested_allocation_arm": requested_arm,
+            "arm_contract": {
+                "research": "unconstrained-scientific-exact-byte-optimization",
+                "runtime_qualified": "official-btx-schema-and-fused-kernel-filtered",
+                "runtime_matches_research": _arm_choice_identity(research_arm)
+                == _arm_choice_identity(runtime_arm),
+                "substitution_policy": "forbidden",
+            },
             "shapley_damage_calibration": {
                 "method": "signed-provisional-ratio-with-unit-constant-offset-v1",
                 "provisional_bit_triplet": list(provisional),
@@ -1222,6 +1344,7 @@ class QwenEvaluatorService:
         gradients = np.asarray(archive["path_gradients"], dtype=np.float64)
         projected = np.asarray(archive["projected_expert_residuals"], dtype=np.float64)
         projected_routing = np.asarray(archive["projected_routing_residuals"], dtype=np.float64)
+        path_weights = np.asarray(archive["path_quadrature_weights"], dtype=np.float64)
         measured = np.asarray(archive["measured_layer_damage"], dtype=np.float64)
         source_kld = float(np.asarray(archive["source_kld"]).reshape(-1)[0])
         candidate_kld = float(np.asarray(archive["candidate_kld"]).reshape(-1)[0])
@@ -1241,14 +1364,34 @@ class QwenEvaluatorService:
         layer_raw = aumann_shapley(list(deltas), gradient_at, path_nodes=nodes)
         if not np.allclose(layer_raw, measured, rtol=1e-10, atol=1e-12):
             raise ValueError("sealed measured layer damage differs from recomputed Aumann-Shapley integral")
+        layer_accounting = reconcile_signed_completeness(layer_raw, measured_end_to_end)
         layers = []
         for index, total in enumerate(measured):
             split = split_layer_damage(
                 float(total),
                 projected[index],
                 projected_routing_residual=projected_routing[index],
+                observation_weights=path_weights,
             )
-            layers.append({"layer_index": int(layer_indices[index]), "aumann_shapley": float(layer_raw[index]), **split})
+            reconciled_layer = float(layer_accounting.reconciled[index])
+            components = reconcile_layer_components_for_allocation(
+                expert_direct=split["expert_direct"],
+                routing_state_shift=split["routing_state_shift"],
+                explicit_residual=split["unresolved_nonlinear_remainder"],
+                raw_layer_damage=float(layer_raw[index]),
+                reconciled_layer_damage=reconciled_layer,
+            )
+            layers.append({
+                "layer_index": int(layer_indices[index]),
+                "aumann_shapley": float(layer_raw[index]),
+                "reconciled_layer_damage": reconciled_layer,
+                "expert_direct": split["expert_direct"],
+                "routing_state_shift_raw": split["routing_state_shift"],
+                "within_layer_unresolved_remainder_raw": split["unresolved_nonlinear_remainder"],
+                "raw_joint_fisher_total": split["raw_total"],
+                "closed_total": split["closed_total"],
+                **components,
+            })
         layer_total = float(np.sum(layer_raw))
         path_remainder = float(measured_end_to_end - layer_total)
         body = {
@@ -1265,11 +1408,136 @@ class QwenEvaluatorService:
             "unresolved_path_quadrature_and_nonlinear_remainder": path_remainder,
             "closed_end_to_end_delta": layer_total + path_remainder,
             "sum_closed_damage": float(sum(row["closed_total"] for row in layers)),
-            "remainder_policy": "explicit-unresolved-nonlinear-remainder",
+            "sum_reconciled_expert_damage": float(sum(row["reconciled_expert_total"] for row in layers)),
+            "remainder_policy": "explicit-route-and-unresolved-components-with-allocation-only-redistribution-v2",
         }
         body["attribution_sha256"] = _hash_json(body)
         write_json(_output(context) / "attribution.json", body)
         return {"attribution_file": "attribution.json"}
+
+    def confirm(self, context: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Evaluate the exact requested allocation arm on the confirmation fold."""
+
+        import torch
+        from transformers import AutoModelForCausalLM
+
+        from ..calibration.windows import verify_sealed_corpus
+        from ..candidates.ledger import validate_ledger
+
+        candidate_root = _dependency(context, "candidates")
+        ledger_path = _result_path(candidate_root, "candidate_ledger_file")
+        ledger = json.loads(ledger_path.read_text())
+        competitive = bool(ledger.get("competitive"))
+        validate_ledger(ledger, competitive=competitive, allow_test_backend=not competitive)
+        allocation_root = _dependency(context, "allocation")
+        allocation_path = _result_path(allocation_root, "allocation_file")
+        allocation = json.loads(allocation_path.read_text())
+        _validate_allocation_document(allocation)
+        requested_arm_name, requested_arm = _requested_allocation_arm(
+            allocation, self.config
+        )
+        choices = list(requested_arm.get("choices", ()))
+        if not choices:
+            raise ValueError(
+                f"confirmation gate requires frozen {requested_arm_name} allocation choices"
+            )
+        records = {str(row["candidate_id"]): row for row in ledger["candidates"]}
+        selected = []
+        for choice in choices:
+            candidate_id = str(choice["choice_id"])
+            record = records.get(candidate_id)
+            if record is None or record.get("record_sha256") != choice.get("candidate_record_sha256"):
+                raise ValueError("confirmation allocation choice differs from its exact candidate record")
+            selected.append(record)
+
+        corpus_path = Path(context["inputs"]["sealed_corpus"])
+        corpus = json.loads(corpus_path.read_text())
+        verify_sealed_corpus(corpus)
+        if corpus.get("schema") != "quant-pipeline.sealed-corpus.v2":
+            raise ValueError("confirmation gate requires sealed-corpus v2 with conditional_fit separated")
+        windows = corpus["windows"]["confirmation"]
+        source = Path(context["inputs"]["source_checkpoint"]).resolve()
+        model = AutoModelForCausalLM.from_pretrained(
+            source,
+            torch_dtype=torch.bfloat16,
+            device_map=self.config.get("device_map", "auto"),
+            low_cpu_mem_usage=True,
+            local_files_only=True,
+            attn_implementation=str(self.config.get("attention_backend", "eager")),
+        ).eval()
+        for parameter in model.parameters():
+            parameter.requires_grad_(False)
+        device = model.get_input_embeddings().weight.device
+
+        def capture() -> np.ndarray:
+            rows = []
+            with torch.inference_mode():
+                for window in windows:
+                    ids = torch.tensor([window["token_ids"]], dtype=torch.long, device=device)
+                    logits = model(input_ids=ids, use_cache=False, return_dict=True).logits[:, :-1]
+                    rows.append(logits.float().cpu().reshape(-1, logits.shape[-1]).numpy())
+            return np.concatenate(rows, axis=0)
+
+        teacher = capture()
+        blocks = qwen_moe_layers(model)
+        store_root = candidate_root / "journal" / "payloads"
+        with torch.no_grad():
+            for record in selected:
+                layer = int(record["layer"])
+                expert = int(record["expert"])
+                if layer not in blocks:
+                    raise ValueError(f"confirmation choice names absent Qwen MoE layer {layer}")
+                module = blocks[layer].experts
+                intermediate = module.gate_up_proj.shape[1] // 2
+                decoded = {
+                    projection: QwenCodecService._load_ref(
+                        store_root,
+                        record["projections"][projection]["exact_payload_refs"]["reconstruction_hf"],
+                    )
+                    for projection in _PROJECTIONS
+                }
+                module.gate_up_proj[expert, :intermediate].copy_(
+                    decoded["gate_proj"].to(module.gate_up_proj.device, module.gate_up_proj.dtype)
+                )
+                module.gate_up_proj[expert, intermediate:].copy_(
+                    decoded["up_proj"].to(module.gate_up_proj.device, module.gate_up_proj.dtype)
+                )
+                module.down_proj[expert].copy_(
+                    decoded["down_proj"].to(module.down_proj.device, module.down_proj.dtype)
+                )
+        student = capture()
+        output = _output(context)
+        reference = output / "confirmation-teacher-logits.npy"
+        candidate = output / "confirmation-student-logits.npy"
+        np.save(reference, teacher, allow_pickle=False)
+        np.save(candidate, student, allow_pickle=False)
+        frozen = {
+            "candidate_ledger_sha256": ledger["ledger_sha256"],
+            "candidate_ledger_file_sha256": sha256_file(ledger_path),
+            "allocation_sha256": allocation["allocation_sha256"],
+            "allocation_file_sha256": sha256_file(allocation_path),
+            "selected_candidate_record_sha256": sorted(
+                str(row["record_sha256"]) for row in selected
+            ),
+        }
+        receipt = {
+            "schema": "quant-pipeline.qwen-post-freeze-confirmation-capture.v1",
+            "role": "confirmation",
+            "prospective_only": True,
+            "frozen": frozen,
+            "requested_allocation_arm": requested_arm_name,
+            "reference_sha256": sha256_file(reference),
+            "capture_sha256": sha256_file(candidate),
+            "prediction_positions": int(teacher.shape[0]),
+            "logit_shape": list(teacher.shape),
+        }
+        receipt["receipt_sha256"] = _hash_json(receipt)
+        write_json(output / "confirmation-capture-receipt.json", receipt)
+        return {
+            "reference_file": reference.name,
+            "capture_file": candidate.name,
+            "confirmation_capture_receipt_file": "confirmation-capture-receipt.json",
+        }
 
     def reanchor(self, context: Mapping[str, Any]) -> Mapping[str, Any]:
         output = _output(context)
@@ -1336,10 +1604,10 @@ class QwenCheckpointService:
         allocation_root = _dependency(context, "allocation")
         allocation = json.loads(_result_path(allocation_root, "allocation_file").read_text())
         _validate_allocation_document(allocation)
-        selected_cost = allocation.get("serving_arm", {}).get("selected_cost")
-        if not isinstance(selected_cost, Mapping):
-            raise ValueError("checkpoint emission requires serving selected_cost")
+        requested_arm_name, requested_arm = _requested_allocation_arm(allocation, self.config)
+        selected_cost = requested_arm["selected_cost"]
         reconciliation = reconcile_installed_allocation(selected_cost, installed)
+        reconciliation = dict(reconciliation) | {"requested_allocation_arm": requested_arm_name}
         write_json(_output(context) / "installed-allocation-reconciliation.json", reconciliation)
         compatibility = btx_compatibility_report(
             installed,

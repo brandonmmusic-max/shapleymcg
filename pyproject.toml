@@ -9,7 +9,7 @@ description = "Auditable research foundations for low-bit LLM calibration, attri
 readme = "README.md"
 requires-python = ">=3.11"
 license = {file = "LICENSE"}
-authors = [{name = "Brandon Music"}]
+authors = [{name = "Brandon M. Music"}]
 dependencies = ["numpy>=1.26"]
 
 [project.optional-dependencies]

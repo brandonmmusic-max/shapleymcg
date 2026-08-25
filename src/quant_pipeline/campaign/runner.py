@@ -34,8 +34,10 @@ BASE_KINDS = (
     "candidates",
     "attribution",
     "allocation",
+    "confirmation",
 )
 GATE_POLICIES = {"continue", "rollback", "request_reallocation"}
+GATE_KINDS = {"confirmation", "kld_reanchor"}
 DEFAULT_MAX_GENERATIONS = 8
 
 
@@ -370,9 +372,23 @@ def _build_stages(definition: CampaignDefinition) -> list[StageSpec]:
             dependencies = ("fit_capture", "fit")
         elif kind == "attribution":
             dependencies = ("teacher_capture", "candidates")
+        elif kind == "confirmation":
+            dependencies = ("candidates", "allocation")
         else:
             dependencies = ("candidates", "attribution")
-        stages.append(StageSpec(kind, kind, dependencies))
+        # Campaign-wide scientific stages operate on the complete sealed layer
+        # inventory.  Carry it in the stage request instead of relying on an
+        # adapter-specific duplicate setting.  Without this binding the shipped
+        # Qwen route-capture service receives neither ``layer`` nor
+        # ``block_layers`` and cannot reach the first fit.
+        block_layers = definition.layers if kind in {
+            "fit_capture",
+            "fit",
+            "candidates",
+            "attribution",
+            "allocation",
+        } else ()
+        stages.append(StageSpec(kind, kind, dependencies, block_layers=block_layers))
 
     accepted_encode_ids: list[str] = []
     accepted_reanchor_ids: list[str] = []
@@ -385,7 +401,7 @@ def _build_stages(definition: CampaignDefinition) -> list[StageSpec]:
         fit_id = f"causal_fit.layer_{layer:03d}"
         candidates_id = f"causal_candidates.layer_{layer:03d}"
         encode_id = f"causal_encode.layer_{layer:03d}"
-        predecessor_dependencies = ["allocation"]
+        predecessor_dependencies = ["allocation", "confirmation"]
         if previous_encode:
             predecessor_dependencies.append(previous_encode)
         if previous_reanchor:
@@ -884,14 +900,27 @@ def _validate_gate(result: StageResult, request: StageRequest | None = None) -> 
                 raise ValueError(f"KLD gate {role} file is missing or invalid")
             if sha256_file(artifact) != gate[hash_field]:
                 raise ValueError(f"KLD gate {role} file hash mismatch")
-        teacher = request.dependency_artifacts.get("teacher_capture")
-        if teacher is None:
-            raise ValueError("KLD gate lacks teacher_capture dependency")
-        teacher_root = request.campaign_dir / teacher["path"]
-        teacher_receipt = json.loads((teacher_root / ".runner-result.json").read_text())
-        teacher_reference = teacher_receipt.get("metadata", {}).get("teacher_reference_sha256")
-        if teacher_reference != gate["reference_sha256"]:
-            raise ValueError("KLD gate reference differs from teacher capture identity")
+        if request.kind == "kld_reanchor":
+            teacher = request.dependency_artifacts.get("teacher_capture")
+            if teacher is None:
+                raise ValueError("KLD re-anchor gate lacks teacher_capture dependency")
+            teacher_root = request.campaign_dir / teacher["path"]
+            teacher_receipt = json.loads((teacher_root / ".runner-result.json").read_text())
+            teacher_reference = teacher_receipt.get("metadata", {}).get("teacher_reference_sha256")
+            if teacher_reference != gate["reference_sha256"]:
+                raise ValueError("KLD gate reference differs from teacher capture identity")
+        elif request.kind == "confirmation":
+            # The confirmation teacher is captured prospectively inside the
+            # gate stage, after the candidate ledger and allocation are
+            # frozen.  Its StageRequest hash already binds those exact two
+            # dependencies; requiring the historical teacher_capture here
+            # would silently turn the gate back into a reused evaluation.
+            if set(request.dependency_artifacts) != {"candidates", "allocation"}:
+                raise ValueError(
+                    "confirmation gate must bind exactly the frozen candidates and allocation"
+                )
+        else:
+            raise ValueError(f"unsupported KLD gate stage kind: {request.kind}")
     return gate
 
 
@@ -1095,7 +1124,7 @@ class CampaignRunner:
                         result = self.adapter.run(request)
                         if not isinstance(result, StageResult):
                             raise TypeError("adapter.run() must return StageResult")
-                        if stage.kind == "kld_reanchor":
+                        if stage.kind in GATE_KINDS:
                             _validate_gate(result, request)
                         _validate_causal_result(request, result)
                         self._validate_retention_result(stage, result)
@@ -1171,7 +1200,7 @@ class CampaignRunner:
                 completed[stage.stage_id] = artifact
                 state_hash = next_state
                 self._plan_retirement_after(stage, completed)
-                if stage.kind == "kld_reanchor":
+                if stage.kind in GATE_KINDS:
                     action = self._record_gate_decision(stage, request, result, completed)
                     if action != "continue":
                         return status_campaign(self.root, self.adapter)
@@ -1193,8 +1222,8 @@ class CampaignRunner:
     def _recover_pending_gate_decision(self, audit: Mapping[str, Any]) -> str:
         stage_id = audit.get("pending_gate")
         stage = next((candidate for candidate in self.stages if candidate.stage_id == stage_id), None)
-        if stage is None or stage.kind != "kld_reanchor":
-            raise ValueError("pending gate does not identify a planned re-anchor stage")
+        if stage is None or stage.kind not in GATE_KINDS:
+            raise ValueError("pending gate does not identify a planned KLD gate stage")
         artifact = audit["completed"][stage_id]
         completions = [
             event
@@ -1236,8 +1265,22 @@ class CampaignRunner:
         completed: Mapping[str, Mapping[str, Any]],
     ) -> str:
         gate = _validate_gate(result, request)
-        action = "continue" if gate["passed"] else self.plan["definition"]["reanchor_failure_policy"]
-        rollback_state = self._block_start_state(stage, request.generation) if action != "continue" else None
+        if gate["passed"]:
+            action = "continue"
+        else:
+            action = self.plan["definition"]["reanchor_failure_policy"]
+            # Confirmation is an admission gate, not an informational
+            # diagnostic.  A legacy `continue` re-anchor policy must not admit
+            # a frozen allocation that failed its untouched confirmation fold.
+            if stage.kind == "confirmation" and action == "continue":
+                action = "request_reallocation"
+        rollback_state = (
+            request.predecessor_state_hash
+            if action != "continue" and stage.kind == "confirmation"
+            else self._block_start_state(stage, request.generation)
+            if action != "continue"
+            else None
+        )
         disposition = "running" if action == "continue" else "replan_pending"
         decision = self.journal.append(
             self._event_body(
@@ -1340,8 +1383,8 @@ class CampaignRunner:
     def _recover_pending_supersession(self, audit: Mapping[str, Any]) -> None:
         stage_id = audit.get("pending_supersession")
         stage = next((candidate for candidate in self.stages if candidate.stage_id == stage_id), None)
-        if stage is None or stage.kind != "kld_reanchor":
-            raise ValueError("pending supersession does not identify a planned re-anchor stage")
+        if stage is None or stage.kind not in GATE_KINDS:
+            raise ValueError("pending supersession does not identify a planned KLD gate stage")
         decisions = [
             event
             for event in self.journal.read()
@@ -2089,7 +2132,7 @@ def _replay(root: Path, plan: Mapping[str, Any]) -> dict[str, Any]:
                         event.get("request_sha256"),
                         retired_by_artifact.get(artifact.get("artifact_sha256", ""), []),
                     )
-                    if stage["kind"] == "kld_reanchor":
+                    if stage["kind"] in GATE_KINDS:
                         _validate_gate(result, replay_request)
                     _validate_causal_result(replay_request, result)
                 except Exception as error:
@@ -2123,7 +2166,7 @@ def _replay(root: Path, plan: Mapping[str, Any]) -> dict[str, Any]:
                 completed[stage_id] = artifact
                 completed_predecessors[stage_id] = event["predecessor_state_hash"]
                 completion_events[stage_id] = event
-                if stage["kind"] == "kld_reanchor":
+                if stage["kind"] in GATE_KINDS:
                     pending_gate = stage_id
         elif kind == "gate_decision":
             decision_key = (stage_id, event_generation)
@@ -2131,7 +2174,7 @@ def _replay(root: Path, plan: Mapping[str, Any]) -> dict[str, Any]:
                 failures.append(f"journal[{event['event_index']}]:duplicate-gate-decision")
                 continue
             gate_decisions_seen.add(decision_key)
-            if stage["kind"] != "kld_reanchor" or stage_id not in completed:
+            if stage["kind"] not in GATE_KINDS or stage_id not in completed:
                 failures.append(f"journal[{event['event_index']}]:invalid-gate-decision")
                 continue
             decision_details = event.get("details", {})

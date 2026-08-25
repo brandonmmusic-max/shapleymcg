@@ -38,6 +38,7 @@ from quant_pipeline.candidates.ledger import (
 from quant_pipeline.codecs.protocols import CodecCandidate
 from quant_pipeline.calibration.fitter import CalibrationBatch, CalibrationFitter
 from quant_pipeline.candidates.payload_store import ExactPayloadStore
+from quant_pipeline.campaign.qwen_work_units import _score_units
 
 
 def _sha(tensor):
@@ -174,6 +175,7 @@ def _expert(k5=None, fisher=True):
         candidate_route_weights=route_mass,
         fisher_gradients=torch.randn(rank, rows, hidden, generator=generator) if fisher else None,
         identity={
+            "role": "selection",
             "document_sha256": "5" * 64,
             "heldout_artifact_sha256": "d" * 64,
             "capture_artifact_sha256": "7" * 64,
@@ -196,6 +198,7 @@ def _expert(k5=None, fisher=True):
             dim=1,
         ),
         identity={
+            "role": "conditional_fit",
             "conditional_down_fit_artifact_sha256": "f" * 64,
             "row_identity_sha256": "a" * 64,
             "document_sha256": "6" * 64,
@@ -897,6 +900,64 @@ def test_down_encodes_are_conditional_on_decoded_gate_up_path(tmp_path):
     assert {unit.rsplit(".", 1)[-1] for unit, _, _ in down} == {"g3u3", "g3u4", "g4u3", "g4u4"}
     assert all(torch.isfinite(hessian).all() for _, _, hessian in down)
     assert len({_sha(hessian) for _, _, hessian in down}) == 4
+
+
+def test_proposal_score_and_canonical_ledger_share_exact_conditional_k4_bytes(tmp_path):
+    codec = DeterministicAttestedCodec()
+    attestation = _attestation(codec)
+    base = _expert()
+    _proxy, _heldout, identities = _score_units([base], codec)
+    scored = replace(
+        base,
+        proposal_score_candidate_identity=identities[base.unit_id],
+    )
+    ledger = CandidateLedgerGenerator(codec, attestation, allow_test_backend=True).generate(
+        [scored],
+        journal=CandidateJournal(tmp_path / "journal", _run_identity(attestation)),
+    )
+    uniform = next(row for row in ledger["candidates"] if row["bit_triplet"] == [4, 4, 4])
+    for score_name, projection in (
+        ("gate_proj", "gate_proj"),
+        ("up_proj", "up_proj"),
+        ("down_proj.g4u4", "down_proj"),
+    ):
+        expected = identities[base.unit_id][score_name]
+        observed = uniform["projections"][projection]
+        assert expected["packed_sha256"] == observed["packed"]["codec_sha256"]
+        assert expected["reconstruction_deployed_fp16_sha256"] == observed["reconstruction_deployed_fp16_sha256"]
+        assert expected["reconstruction_hf_sha256"] == observed["reconstruction_hf"]["sha256"]
+
+
+def test_confirmation_role_cannot_leak_into_selection_or_conditional_fit(tmp_path):
+    codec = DeterministicAttestedCodec()
+    attestation = _attestation(codec)
+    base = _expert()
+    heldout = base.heldout_batches[0]
+    bad_heldout = replace(heldout, identity=dict(heldout.identity) | {"role": "confirmation"})
+    bad_heldout = replace(
+        bad_heldout,
+        identity=dict(bad_heldout.identity) | {"batch_payload_sha256": routed_batch_sha256(bad_heldout)},
+    )
+    with pytest.raises(ValueError, match="selection role"):
+        CandidateLedgerGenerator(codec, attestation, allow_test_backend=True).generate(
+            [replace(base, heldout_batches=[bad_heldout])],
+            journal=CandidateJournal(tmp_path / "heldout-leak", _run_identity(attestation)),
+        )
+    conditional = base.conditional_down_fit_batches[0]
+    bad_conditional = replace(
+        conditional,
+        identity=dict(conditional.identity) | {"role": "confirmation"},
+    )
+    bad_conditional = replace(
+        bad_conditional,
+        identity=dict(bad_conditional.identity)
+        | {"batch_payload_sha256": conditional_down_fit_batch_sha256(bad_conditional)},
+    )
+    with pytest.raises(ValueError, match="conditional_fit, not confirmation"):
+        CandidateLedgerGenerator(codec, attestation, allow_test_backend=True).generate(
+            [replace(base, conditional_down_fit_batches=[bad_conditional])],
+            journal=CandidateJournal(tmp_path / "conditional-leak", _run_identity(attestation)),
+        )
 
 
 def test_conditional_down_fit_is_disjoint_from_heldout_scoring_rows(tmp_path):

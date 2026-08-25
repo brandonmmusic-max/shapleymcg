@@ -109,7 +109,13 @@ def main() -> int:
     report_path = root / "report.json"
     report = json.loads(report_path.read_text())
     _verify_json_seal(report, "report_sha256", "union report")
-    plan = json.loads((root / "plan.json").read_text())
+    plan_path = root / "plan.json"
+    allocation_path = root / "factory-allocation.json"
+    plan = json.loads(plan_path.read_text())
+    allocation = json.loads(allocation_path.read_text())
+    _verify_json_seal(allocation, "allocation_sha256", "factory allocation")
+    if report.get("factory_allocation_sha256") != allocation["allocation_sha256"]:
+        raise ValueError("report belongs to another factory allocation")
     panel = json.loads((panel_root / "panel.json").read_text())
     _verify_json_seal(panel, "panel_sha256", "evaluation panel")
     if report["panel_sha256"] != panel["panel_sha256"]:
@@ -120,14 +126,49 @@ def main() -> int:
         raise ValueError("evaluation panel lacks ten teacher rows")
 
     selection_row = int(report["selection"]["row"])
+    if int(plan["selection_row"]) != selection_row:
+        raise ValueError("plan and report selection rows differ")
+    if allocation.get("selection_row") != selection_row:
+        raise ValueError("factory allocation and report selection rows differ")
+    selection_teacher_sha256 = sha256_file(teacher_paths[selection_row])
+    allocation_teacher_sha256 = allocation.get("selection_teacher_sha256")
+    if allocation_teacher_sha256 is not None:
+        if allocation_teacher_sha256 != selection_teacher_sha256:
+            raise ValueError("factory allocation belongs to another selection teacher")
+    else:
+        # The MCG-vs-MCG union binds all teacher rows through the sealed teacher
+        # receipt instead of duplicating row 0 in the allocation document.
+        teacher_receipt_path = panel_root / "teacher-receipt.json"
+        if not teacher_receipt_path.is_file():
+            raise ValueError("factory allocation lacks a teacher hash and panel lacks its teacher receipt")
+        teacher_receipt = json.loads(teacher_receipt_path.read_text())
+        _verify_json_seal(teacher_receipt, "receipt_sha256", "teacher receipt")
+        if report.get("teacher_receipt_sha256") != teacher_receipt["receipt_sha256"]:
+            raise ValueError("report belongs to another teacher receipt")
+        receipt_rows = teacher_receipt.get("teacher_files", ())
+        if len(receipt_rows) != len(teacher_paths):
+            raise ValueError("teacher receipt row inventory is incomplete")
+        for path, receipt_row in zip(teacher_paths, receipt_rows, strict=True):
+            if sha256_file(path) != receipt_row["sha256"]:
+                raise ValueError(f"teacher receipt hash mismatch for {path.name}")
     teacher = _load_logits(teacher_paths[selection_row])
     selection_values: dict[str, np.ndarray] = {}
+    replayed_files: list[dict[str, Any]] = []
     for arm in ("baseline", "union"):
         path = root / f"selection-{arm}-student-logits" / f"row-{selection_row:02d}.safetensors"
         expected = report["selection"][f"{arm}_student_logits_sha256"]
         if sha256_file(path) != expected:
             raise ValueError(f"selection {arm} student-logit hash mismatch")
         selection_values[arm] = _token_kld_torch(teacher, _load_logits(path))
+        replayed_files.append({"path": path.relative_to(root).as_posix(), "sha256": sha256_file(path)})
+        token_path = root / f"selection-{arm}.token-kld.npy"
+        expected_token_sha = report["selection"].get(f"{arm}_token_kld_sha256")
+        if expected_token_sha is not None and sha256_file(token_path) != expected_token_sha:
+            raise ValueError(f"selection {arm} token-KLD hash mismatch")
+        producer_token = np.asarray(np.load(token_path, allow_pickle=False), dtype=np.float64)
+        if not np.allclose(producer_token, selection_values[arm], rtol=0.0, atol=args.tolerance):
+            raise ValueError(f"selection {arm} token KLD differs from independent recomputation")
+        replayed_files.append({"path": token_path.relative_to(root).as_posix(), "sha256": sha256_file(token_path)})
     _close(
         float(selection_values["baseline"].mean()),
         float(report["selection"]["baseline_mean_kld"]),
@@ -153,12 +194,15 @@ def main() -> int:
             record = records[row]
             if sha256_file(student_path) != record["student_logits_sha256"]:
                 raise ValueError(f"validation {arm} row {row} student-logit hash mismatch")
+            if sha256_file(teacher_paths[row]) != record["teacher_sha256"]:
+                raise ValueError(f"validation {arm} row {row} teacher-logit hash mismatch")
             student = _load_logits(student_path)
             token = _token_kld_torch(teacher, student)
             _close(float(token.mean()), float(record["mean_kld"]), f"{arm} row {row} KLD", args.tolerance)
             top1 = float(np.mean(np.argmax(teacher, axis=-1) == np.argmax(student, axis=-1)))
             _close(top1, float(record["top1_agreement"]), f"{arm} row {row} top1", 0.0)
             values.append(token)
+            replayed_files.append({"path": student_path.relative_to(root).as_posix(), "sha256": sha256_file(student_path)})
         by_arm[arm] = np.stack(values)
         _close(
             float(by_arm[arm].mean()),
@@ -172,6 +216,8 @@ def main() -> int:
         )
         if not np.allclose(produced, by_arm[arm], rtol=0.0, atol=args.tolerance):
             raise ValueError(f"validation {arm} token KLD differs from independent recomputation")
+        token_path = root / f"validation-{arm}.token-kld.npy"
+        replayed_files.append({"path": token_path.relative_to(root).as_posix(), "sha256": sha256_file(token_path)})
 
     delta = by_arm["baseline"] - by_arm["union"]
     interval = _paired_block_interval(delta.reshape(-1), seed=int(plan["seed"]) + 10_000)
@@ -183,6 +229,9 @@ def main() -> int:
         "schema": "quant-pipeline.qwen-candidate-factory-union-independent-verification.v1",
         "report_sha256": report["report_sha256"],
         "report_file_sha256": sha256_file(report_path),
+        "plan_file_sha256": sha256_file(plan_path),
+        "factory_allocation_sha256": allocation["allocation_sha256"],
+        "factory_allocation_file_sha256": sha256_file(allocation_path),
         "panel_sha256": panel["panel_sha256"],
         "implementation": "torch.float64 log_softmax independent recomputation",
         "selection_baseline_mean_kld": float(selection_values["baseline"].mean()),
@@ -196,6 +245,8 @@ def main() -> int:
             by_arm["union"].mean(axis=1) < by_arm["baseline"].mean(axis=1)
         )),
         "row_count": len(validation_rows),
+        "replayed_file_count": len(replayed_files),
+        "replayed_files_sha256": _hash_json(sorted(replayed_files, key=lambda row: row["path"])),
         "tolerance": args.tolerance,
         "verified": True,
     }

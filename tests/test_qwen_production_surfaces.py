@@ -287,6 +287,9 @@ def test_qwen_fitter_service_streams_one_layer_and_retains_only_objective_power(
         "predecessor_state_hash": H,
         "input_identities": {"source_checkpoint": H},
     })
+    assert result["transient_files"]
+    assert "fit-manifest.json" not in result["transient_files"]
+    assert all((output / relative).is_file() for relative in result["transient_files"])
     fitted = json.loads((output / result["fit_manifest_file"]).read_text())
     assert fitted["layers"] == [0]
     assert fitted["estimator"]["retained_powers"] == [2]

@@ -46,6 +46,7 @@ def command_seal(args) -> None:
     tokenizer = AutoTokenizer.from_pretrained(spec.corpus.tokenizer_id, revision=spec.model.revision)
     limits = {
         "fit": spec.corpus.fit_windows,
+        "conditional_fit": spec.corpus.conditional_fit_windows,
         "selection": spec.corpus.selection_windows,
         "confirmation": spec.corpus.confirmation_windows,
         "final": spec.corpus.final_windows,
@@ -265,7 +266,11 @@ def build_parser() -> argparse.ArgumentParser:
     capture = sub.add_parser("capture", help="capture logits and router logits from a sealed role")
     capture.add_argument("--model", required=True)
     capture.add_argument("--sealed-corpus", required=True)
-    capture.add_argument("--role", required=True, choices=("fit", "selection", "confirmation", "final", "kld"))
+    capture.add_argument(
+        "--role",
+        required=True,
+        choices=("fit", "conditional_fit", "selection", "confirmation", "final", "kld"),
+    )
     capture.add_argument("--output-dir", required=True)
     capture.add_argument("--dtype", default="bfloat16", choices=("bfloat16", "float16", "float32"))
     capture.add_argument("--device-map", default="auto")
@@ -340,6 +345,7 @@ def build_parser() -> argparse.ArgumentParser:
     campaign_audit.add_argument("--campaign-dir", required=True)
     campaign_audit.add_argument("--adapter", required=True, help="Python StageAdapter as module:attribute")
     campaign_audit.set_defaults(func=command_campaign_audit)
+
     return parser
 
 

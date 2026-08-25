@@ -42,8 +42,12 @@ from .factory_union import (
     build_factory_union,
 )
 from .factory_calibration import (
+    FactoryDomainAnchor,
     FactoryDeltaAnchor,
+    FactoryRateProxyEvidence,
+    ReanchoredFactoryScorer,
     apply_factory_delta_calibration,
+    build_factory_domain_reanchor,
     fit_factory_delta_calibration,
 )
 from .factory_allocation import (
@@ -90,7 +94,11 @@ __all__ = [
     "FactoryUnion",
     "build_factory_union",
     "FactoryDeltaAnchor",
+    "FactoryDomainAnchor",
+    "FactoryRateProxyEvidence",
+    "ReanchoredFactoryScorer",
     "apply_factory_delta_calibration",
+    "build_factory_domain_reanchor",
     "fit_factory_delta_calibration",
     "CoupledFactoryAllocation",
     "allocate_factory_union",

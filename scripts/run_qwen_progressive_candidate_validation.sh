@@ -9,7 +9,8 @@ set -euo pipefail
 
 RUN_ROOT=${RUN_ROOT:-/artifacts/shapleymcg/qwen3-30b-a3b-v1/progressive-candidate-v1}
 BASE_ROOT=${BASE_ROOT:-/qwen-shapleymcg-run}
-CODE_ROOT=${CODE_ROOT:-${BASE_ROOT}/code-next}
+SCRIPT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+CODE_ROOT=${CODE_ROOT:-${SCRIPT_ROOT}}
 PYTHON=${PYTHON:-/workspace/quant-venv/bin/python}
 MODEL=${MODEL:-/models/Qwen3-30B-A3B-Base}
 MODEL_REVISION=${MODEL_REVISION:-1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9}
@@ -29,6 +30,22 @@ GLM_MODEL_REPO=${GLM_MODEL_REPO:-brandonmusic/GLM-5.2-EXL3-TR3v4-3.5bpw-MTP78}
 GLM_MODEL_REVISION=${GLM_MODEL_REVISION:-7c73450f05a151439d0f184f216b1eefcc394a31}
 LOG_ROOT=${LOG_ROOT:-${RUN_ROOT}/logs}
 POLL_SECONDS=${POLL_SECONDS:-30}
+ACTION=${ACTION:-plan}
+PUBLISH=${PUBLISH:-0}
+
+case "${ACTION}" in
+    plan|execute) ;;
+    *) printf 'ACTION must be plan or execute\n' >&2; exit 2 ;;
+esac
+if [[ "${PUBLISH}" != 0 && "${PUBLISH}" != 1 ]]; then
+    printf 'PUBLISH must be 0 or 1\n' >&2
+    exit 2
+fi
+if [[ "${ACTION}" == plan ]]; then
+    printf '{"action":"plan","code_root":"%s","publish":%s,"run_root":"%s","validation_root":"%s"}\n' \
+        "${CODE_ROOT}" "${PUBLISH}" "${RUN_ROOT}" "${VALIDATION_ROOT}"
+    exit 0
+fi
 
 export PYTHONPATH="${CODE_ROOT}/src:${CODE_ROOT}/scripts:${BASE_ROOT}/encoding-site${PYTHONPATH:+:${PYTHONPATH}}"
 mkdir -p "${LOG_ROOT}" "${VALIDATION_ROOT}"
@@ -67,58 +84,14 @@ for layer in $(seq 0 47); do
     test "$(cat "${LOG_ROOT}/fast-encode-layer-$(printf '%03d' "${layer}").exit")" = 0
 done
 
-# Avoid competing Hub commits with the fit publisher. Its data are already
-# preserved remotely, but its receipt commit must finish before candidate
-# publication begins.
-while pgrep -f "upload_qwen_bulk_remaining_hf.py.*--kind fit" >/dev/null; do
-    printf '{"stage":"wait-fit-publication"}\n'
-    sleep "${POLL_SECONDS}"
-done
-
-token_file="${LOG_ROOT}/progressive-candidate-hf-token"
-install -m 600 "${HF_TOKEN_SOURCE}" "${token_file}"
-upload_log="${LOG_ROOT}/hf-upload-progressive-candidates.log"
-"${PYTHON}" "${CODE_ROOT}/scripts/upload_qwen_bulk_remaining_hf.py" \
-    --repo-id "${HF_REPO}" \
-    --run-root "${RUN_ROOT}" \
-    --token-file "${token_file}" \
-    --kind candidate \
-    --path-prefix "${HF_PATH_PREFIX}" \
-    --first-layer 0 \
-    --layers 48 \
-    --batch-layers 4 \
-    --retry-minutes 75 \
-    --include-receipted \
-    2>&1 | tee "${upload_log}"
-
-candidate_revision=$("${PYTHON}" - "${upload_log}" <<'PY'
-import json
-import pathlib
-import sys
-
-for line in reversed(pathlib.Path(sys.argv[1]).read_text(errors="replace").splitlines()):
-    try:
-        row = json.loads(line)
-    except json.JSONDecodeError:
-        continue
-    if row.get("ok") is True and row.get("kind") == "candidate":
-        print(row["receipt_revision"])
-        break
-else:
-    raise SystemExit("candidate upload log lacks a successful immutable revision")
-PY
-)
-
-inventory="${VALIDATION_ROOT}/candidate-inventory.json"
+inventory="${VALIDATION_ROOT}/candidate-inventory-local.json"
 if ! test -s "${inventory}"; then
     "${PYTHON}" "${CODE_ROOT}/scripts/build_qwen_candidate_inventory.py" \
-        --repo "${HF_REPO}" \
-        --revision "${candidate_revision}" \
-        --path-prefix "${HF_PATH_PREFIX}" \
+        --local-root "${RUN_ROOT}/fast-encode" \
         --output "${inventory}" \
         --workers 12 \
         --execute \
-        2>&1 | tee "${LOG_ROOT}/progressive-candidate-inventory.log"
+        2>&1 | tee "${LOG_ROOT}/progressive-local-candidate-inventory.log"
 fi
 
 allocation="${VALIDATION_ROOT}/frozen-causal-rate-allocation.json"
@@ -155,6 +128,18 @@ if ! test -s "${union_output}/report.json"; then
         2>&1 | tee "${LOG_ROOT}/progressive-native-factory-union.log"
 fi
 
+union_verification="${union_output}/independent-verification.json"
+if ! test -s "${union_verification}"; then
+    # Saved-logit replay only: this starts no model and performs no additional
+    # forward pass.  It binds the chosen factory allocation, teacher receipt,
+    # every endpoint logit file, and every producer token-KLD array.
+    "${PYTHON}" "${CODE_ROOT}/scripts/verify_qwen_candidate_factory_union.py" \
+        --experiment-root "${union_output}" \
+        --panel-root "${TEACHER_PANEL_ROOT}" \
+        --output "${union_verification}" \
+        2>&1 | tee "${LOG_ROOT}/progressive-native-factory-union-verification.log"
+fi
+
 lineage_output="${VALIDATION_ROOT}/glm-lineage"
 if ! test -s "${lineage_output}/lineage.json"; then
     "${PYTHON}" "${CODE_ROOT}/scripts/bind_qwen_glm_lineage.py" \
@@ -183,11 +168,71 @@ if ! test -s "${summary_output}"; then
         2>&1 | tee "${LOG_ROOT}/progressive-result-summary.log"
 fi
 
+if [[ "${PUBLISH}" == 1 ]]; then
+    # Publication is deliberately downstream of the completed local result.
+    # A plan/execute run with the default PUBLISH=0 never reads credentials,
+    # creates a remote commit, or deletes a local fit/candidate artifact.
+    while pgrep -f "upload_qwen_bulk_remaining_hf.py.*--kind fit" >/dev/null; do
+        printf '{"stage":"wait-fit-publication"}\n'
+        sleep "${POLL_SECONDS}"
+    done
+    test -s "${HF_TOKEN_SOURCE}"
+    token_file="${LOG_ROOT}/progressive-candidate-hf-token"
+    install -m 600 "${HF_TOKEN_SOURCE}" "${token_file}"
+    upload_log="${LOG_ROOT}/hf-upload-progressive-candidates.log"
+    "${PYTHON}" "${CODE_ROOT}/scripts/upload_qwen_bulk_remaining_hf.py" \
+        --repo-id "${HF_REPO}" \
+        --run-root "${RUN_ROOT}" \
+        --token-file "${token_file}" \
+        --kind candidate \
+        --path-prefix "${HF_PATH_PREFIX}" \
+        --first-layer 0 \
+        --layers 48 \
+        --batch-layers 4 \
+        --retry-minutes 75 \
+        --include-receipted \
+        2>&1 | tee "${upload_log}"
+
+    candidate_revision=$("${PYTHON}" - "${upload_log}" <<'PY'
+import json
+import pathlib
+import sys
+
+for line in reversed(pathlib.Path(sys.argv[1]).read_text(errors="replace").splitlines()):
+    try:
+        row = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if row.get("ok") is True and row.get("kind") == "candidate":
+        print(row["receipt_revision"])
+        break
+else:
+    raise SystemExit("candidate upload log lacks a successful immutable revision")
+PY
+    )
+    published_inventory="${VALIDATION_ROOT}/candidate-inventory-published.json"
+    if ! test -s "${published_inventory}"; then
+        "${PYTHON}" "${CODE_ROOT}/scripts/build_qwen_candidate_inventory.py" \
+            --repo "${HF_REPO}" \
+            --revision "${candidate_revision}" \
+            --path-prefix "${HF_PATH_PREFIX}" \
+            --output "${published_inventory}" \
+            --workers 12 \
+            --execute \
+            2>&1 | tee "${LOG_ROOT}/progressive-published-candidate-inventory.log"
+    fi
+fi
+
 "${PYTHON}" "${CODE_ROOT}/scripts/seal_artifact_tree.py" \
     --root "${VALIDATION_ROOT}" \
     --label qwen3-30b-a3b-base-final-native-progressive-factory-union-sdpa-20k \
     --execute \
     2>&1 | tee "${LOG_ROOT}/progressive-frozen-rate-seal.log"
+
+if [[ "${PUBLISH}" == 0 ]]; then
+    printf 'final progressive factory-union validation completed locally; publication disabled\n'
+    exit 0
+fi
 
 publication_root="${RUN_ROOT}/artifacts/hf-upload/progressive-validation"
 mkdir -p "${publication_root}"

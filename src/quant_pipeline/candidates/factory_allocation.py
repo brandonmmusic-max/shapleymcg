@@ -47,6 +47,7 @@ def _candidate_metadata(candidate: Candidate) -> Mapping[str, Any]:
         "coupling_group_id",
         "compatibility_domain_sha256",
         "fixed_shared_bytes",
+        "domain_fixed_damage",
         "proposal_sha256",
         "common_score_sha256",
         "record_sha256",
@@ -62,6 +63,9 @@ def _candidate_metadata(candidate: Candidate) -> Mapping[str, Any]:
     fixed = metadata["fixed_shared_bytes"]
     if isinstance(fixed, bool) or not isinstance(fixed, int) or fixed < 0:
         raise ValueError("factory candidate fixed shared bytes must be nonnegative")
+    fixed_damage = metadata["domain_fixed_damage"]
+    if isinstance(fixed_damage, bool) or not isinstance(fixed_damage, (int, float)) or not math.isfinite(float(fixed_damage)):
+        raise ValueError("factory candidate domain-fixed damage must be finite")
     return metadata
 
 
@@ -70,6 +74,7 @@ def _internal_frontier(
     *,
     expected_units: set[str],
     quantum: int,
+    preserve_every_cost: bool = False,
 ) -> list[Candidate]:
     """Return all non-dominated exact private-byte profiles for one domain."""
 
@@ -83,7 +88,21 @@ def _internal_frontier(
 
     states: dict[int, tuple[float, tuple[Candidate, ...]]] = {0: (0.0, ())}
     for unit_id in sorted(grouped):
-        choices = pareto_frontier(grouped[unit_id])
+        if preserve_every_cost:
+            best_by_cost: dict[int, Candidate] = {}
+            for candidate in grouped[unit_id]:
+                previous = best_by_cost.get(candidate.stored_bytes)
+                if previous is None or (
+                    candidate.predicted_damage,
+                    candidate.choice_id,
+                ) < (
+                    previous.predicted_damage,
+                    previous.choice_id,
+                ):
+                    best_by_cost[candidate.stored_bytes] = candidate
+            choices = list(best_by_cost.values())
+        else:
+            choices = pareto_frontier(grouped[unit_id])
         next_states: dict[int, tuple[float, tuple[Candidate, ...]]] = {}
         for used, (damage, selected) in states.items():
             for choice in choices:
@@ -92,13 +111,19 @@ def _internal_frontier(
                 previous = next_states.get(new_used)
                 if previous is None or new_damage < previous[0]:
                     next_states[new_used] = (new_damage, selected + (choice,))
-        states = {}
-        best = math.inf
-        for used in sorted(next_states):
-            damage, selected = next_states[used]
-            if damage < best:
-                states[used] = (damage, selected)
-                best = damage
+        if preserve_every_cost:
+            # Exact-fill allocation cannot discard a higher-cost state merely
+            # because a cheaper state has lower damage: that exact cost can be
+            # the only way to close the global byte budget.
+            states = next_states
+        else:
+            states = {}
+            best = math.inf
+            for used in sorted(next_states):
+                damage, selected = next_states[used]
+                if damage < best:
+                    states[used] = (damage, selected)
+                    best = damage
     return [
         Candidate(
             unit_id="internal-profile",
@@ -116,6 +141,7 @@ def allocate_factory_union(
     *,
     byte_budget: int,
     quantum: int = 1,
+    require_exact_budget: bool = False,
 ) -> CoupledFactoryAllocation:
     """Select exact-rate and factory choices without mixing shared domains.
 
@@ -143,6 +169,7 @@ def allocate_factory_union(
 
     by_group_domain: dict[tuple[str, str], list[Candidate]] = {}
     fixed_costs: dict[tuple[str, str], int] = {}
+    fixed_damages: dict[tuple[str, str], float] = {}
     for candidate in candidates:
         metadata = _candidate_metadata(candidate)
         group = str(metadata["coupling_group_id"])
@@ -154,6 +181,10 @@ def allocate_factory_union(
         incumbent = fixed_costs.setdefault(key, fixed)
         if incumbent != fixed:
             raise ValueError("fixed shared byte cost differs inside a compatibility domain")
+        fixed_damage = float(metadata["domain_fixed_damage"])
+        incumbent_damage = fixed_damages.setdefault(key, fixed_damage)
+        if not math.isclose(incumbent_damage, fixed_damage, rel_tol=0.0, abs_tol=0.0):
+            raise ValueError("domain-fixed damage differs inside a compatibility domain")
         by_group_domain.setdefault(key, []).append(candidate)
 
     outer_candidates: list[Candidate] = []
@@ -166,17 +197,20 @@ def allocate_factory_union(
             values,
             expected_units=units_by_group[group],
             quantum=quantum,
+            preserve_every_cost=require_exact_budget,
         )
         if not profiles:
             continue
         for profile in profiles:
             selected = tuple(profile.metadata["selected_candidates"])
+            fixed_damage = fixed_damages[(group, domain)]
             choice_body = {
                 "coupling_group_id": group,
                 "compatibility_domain_sha256": domain,
                 "fixed_shared_bytes": fixed,
                 "private_payload_bytes": profile.stored_bytes,
                 "selected_choice_ids": [row.choice_id for row in selected],
+                "domain_fixed_damage": fixed_damage,
             }
             choice_sha = _hash_json(choice_body)
             outer_candidates.append(
@@ -184,7 +218,7 @@ def allocate_factory_union(
                     unit_id=group,
                     choice_id=f"{group}.{domain[:16]}.{choice_sha[:16]}",
                     stored_bytes=fixed + profile.stored_bytes,
-                    predicted_damage=profile.predicted_damage,
+                    predicted_damage=profile.predicted_damage + fixed_damage,
                     metadata=choice_body
                     | {
                         "choice_sha256": choice_sha,
@@ -197,6 +231,7 @@ def allocate_factory_union(
                 "coupling_group_id": group,
                 "compatibility_domain_sha256": domain,
                 "fixed_shared_bytes": fixed,
+                "domain_fixed_damage": fixed_damages[(group, domain)],
                 "profile_count": len(profiles),
             }
         )
@@ -207,7 +242,45 @@ def allocate_factory_union(
             + ", ".join(missing_groups)
         )
 
-    result = allocate(outer_candidates, byte_budget=byte_budget, quantum=quantum)
+    if require_exact_budget:
+        grouped: dict[str, list[Candidate]] = {}
+        for candidate in outer_candidates:
+            grouped.setdefault(candidate.unit_id, []).append(candidate)
+        states: dict[int, tuple[float, tuple[Candidate, ...]]] = {0: (0.0, ())}
+        for group in sorted(grouped):
+            next_states: dict[int, tuple[float, tuple[Candidate, ...]]] = {}
+            for used, (damage, selected) in states.items():
+                for choice in grouped[group]:
+                    new_used = used + choice.stored_bytes
+                    if new_used > byte_budget:
+                        continue
+                    new_damage = damage + choice.predicted_damage
+                    previous = next_states.get(new_used)
+                    new_ids = tuple(row.choice_id for row in selected + (choice,))
+                    previous_ids = (
+                        tuple(row.choice_id for row in previous[1])
+                        if previous is not None
+                        else ()
+                    )
+                    if previous is None or (new_damage, new_ids) < (
+                        previous[0], previous_ids
+                    ):
+                        next_states[new_used] = (new_damage, selected + (choice,))
+            if not next_states:
+                raise ValueError(f"exact coupled budget is infeasible at group {group}")
+            states = next_states
+        exact = states.get(byte_budget)
+        if exact is None:
+            raise ValueError(
+                f"no compatibility-safe candidate-factory allocation exactly fills {byte_budget} bytes"
+            )
+        result = Allocation(
+            choices=exact[1],
+            stored_bytes=byte_budget,
+            predicted_damage=exact[0],
+        )
+    else:
+        result = allocate(outer_candidates, byte_budget=byte_budget, quantum=quantum)
     selected_private = tuple(
         private
         for profile in result.choices
@@ -226,6 +299,9 @@ def allocate_factory_union(
                 "private_payload_bytes": metadata["private_payload_bytes"],
                 "stored_bytes": profile.stored_bytes,
                 "predicted_damage": profile.predicted_damage,
+                "domain_fixed_damage": metadata["domain_fixed_damage"],
+                "private_predicted_damage": profile.predicted_damage
+                - metadata["domain_fixed_damage"],
                 "choice_sha256": metadata["choice_sha256"],
                 "selected_choice_ids": metadata["selected_choice_ids"],
             }
@@ -240,6 +316,7 @@ def allocate_factory_union(
             "rate": row.metadata["rate"],
             "coupling_group_id": row.metadata["coupling_group_id"],
             "compatibility_domain_sha256": row.metadata["compatibility_domain_sha256"],
+            "domain_fixed_damage": row.metadata["domain_fixed_damage"],
             "record_sha256": row.metadata["record_sha256"],
         }
         for row in selected_private
@@ -249,6 +326,7 @@ def allocate_factory_union(
         "factory_union_ledger_sha256": union.ledger["ledger_sha256"],
         "byte_budget": byte_budget,
         "quantum": quantum,
+        "exact_budget_required": bool(require_exact_budget),
         "stored_bytes": result.stored_bytes,
         "predicted_damage": result.predicted_damage,
         "compatibility_policy": "one complete shared-transform domain per coupling group",

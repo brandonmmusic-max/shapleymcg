@@ -168,6 +168,7 @@ Seal the resulting extension SHA256 into both artifact and adapter inputs.
 python scripts/estimate_qwen_b200_resources.py \
   --retention capture-plus-ledger \
   --fit-windows 32 \
+  --conditional-fit-windows 16 \
   --selection-windows 16 \
   --confirmation-windows 16 \
   --final-windows 25 \
@@ -190,11 +191,14 @@ line. Every row must contain a stable `id`, a `domain`, and the full `text`:
 {"id":"document-0001","domain":"legal","text":"Complete source document ..."}
 ```
 
-Supply enough full documents in at least four domains to produce 32 fit, 16
-selection, 16 confirmation, and 25 final windows after target tokenization.
-The sealer assigns whole documents—not fragments—to one role, deterministically
-stratifies by domain, rejects duplicate IDs, and fails if any document crosses
-roles. Record the input JSONL SHA256 before sealing.
+Supply enough full documents in at least four domains to produce 32 `fit`, 16
+`conditional_fit`, 16 `selection`, 16 `confirmation`, and 25 `final` windows
+after target tokenization. `conditional_fit` is the only role that may capture
+quantized-predecessor state for conditional-down fitting; `confirmation` is
+prospective-only after the allocation is frozen. The sealer assigns whole
+documents—not fragments—to one role, deterministically stratifies by domain,
+rejects duplicate IDs, and fails if any document crosses roles. Record the
+input JSONL SHA256 before sealing.
 
 ```bash
 quant-pipeline seal \

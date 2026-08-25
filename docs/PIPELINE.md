@@ -6,13 +6,29 @@ is mapped to individual components in `docs/REFERENCES.md`. Passing unit tests
 does not substitute for the final exact-codec, final-logit-KLD, checkpoint, and
 runtime gates.
 
+**Current evidence boundary:** the validated Qwen path is native source-state
+MCG candidate generation, Aumann–Shapley/Fisher exact-3.5 allocation, causal
+re-anchoring, and stored-logit KLD replay. Candidate-factory composition is an
+implemented extension surface, but no joint factory/rate real-model endpoint
+has been validated. References to “production” below describe required
+contracts and gates, not an additional measured result.
+
 ## Stage 0: freeze identity and repair the instrument
 
-Resolve the model revision, hash `config.json`, index and shards, seal the four
-document-disjoint corpus roles, and capture new BF16 teacher logits. Separately,
+Resolve the model revision, hash `config.json`, index and shards, seal the five
+document-disjoint corpus roles (`fit`, `conditional_fit`, `selection`,
+`confirmation`, and `final`), and capture new BF16 teacher logits. Separately,
 seal the historical GLM-style WikiText control for the target model. Calibration
 data used for scales cannot appear in confirmation or KLD. Bind software
 image/driver/tool versions in the run receipt.
+
+After the fast target-model gate is measured, run
+`scripts/bind_qwen_glm_lineage.py` to close the cross-model provenance chain.
+It verifies the original calibration JSONL byte-for-byte at the immutable GLM
+model revision, verifies the selected Qwen corpus/window/teacher files at the
+immutable Qwen dataset revision, and binds the measured target-model gate to
+that teacher. This is a lineage operation, not a claim that token IDs or logits
+are portable between GLM and Qwen.
 
 ### Historical KLD control
 
