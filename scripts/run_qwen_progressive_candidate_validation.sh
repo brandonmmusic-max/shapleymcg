@@ -14,6 +14,7 @@ PYTHON=${PYTHON:-/workspace/quant-venv/bin/python}
 MODEL=${MODEL:-/models/Qwen3-30B-A3B-Base}
 MODEL_REVISION=${MODEL_REVISION:-1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9}
 SOURCE_ALLOCATION=${SOURCE_ALLOCATION:-/artifacts/shapleymcg/qwen3-30b-a3b-v1/causal-arm-v3/allocation-stage/allocation.json}
+BASELINE_INVENTORY=${BASELINE_INVENTORY:-/artifacts/shapleymcg/qwen3-30b-a3b-v1/causal-arm-v3/candidate-inventory.json}
 TEACHER_PANEL_ROOT=${TEACHER_PANEL_ROOT:-/artifacts/shapleymcg/qwen3-30b-a3b-v1/causal-arm-v3/turboderp-wiki2-sdpa-teacher}
 HF_REPO=${HF_REPO:-brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility}
 HF_PATH_PREFIX=${HF_PATH_PREFIX:-candidate-factories/progressive-state-v1}
@@ -143,6 +144,29 @@ if ! test -s "${panel_output}/kld-report.json"; then
         --attention-backend sdpa \
         --execute \
         2>&1 | tee "${LOG_ROOT}/progressive-frozen-rate-panel.log"
+fi
+
+union_output="${VALIDATION_ROOT}/factory-union-native-vs-progressive"
+if ! test -s "${union_output}/report.json"; then
+    "${PYTHON}" "${CODE_ROOT}/scripts/measure_qwen_mcg_factory_union.py" \
+        --source-model "${MODEL}" \
+        --model-revision "${MODEL_REVISION}" \
+        --baseline-allocation "${SOURCE_ALLOCATION}" \
+        --baseline-inventory "${BASELINE_INVENTORY}" \
+        --baseline-label native-source-state-mcg \
+        --challenger-allocation "${allocation}" \
+        --challenger-inventory "${inventory}" \
+        --challenger-local-root "${RUN_ROOT}/fast-encode" \
+        --challenger-label progressive-state-mcg \
+        --candidate-cache "${RUN_ROOT}/baseline-candidate-cache" \
+        --panel-root "${TEACHER_PANEL_ROOT}" \
+        --teacher-receipt "${TEACHER_PANEL_ROOT}/teacher-receipt.json" \
+        --output "${union_output}" \
+        --attention-backend sdpa \
+        --selection-row 0 \
+        --seed 20260825 \
+        --execute \
+        2>&1 | tee "${LOG_ROOT}/progressive-native-factory-union.log"
 fi
 
 "${PYTHON}" "${CODE_ROOT}/scripts/seal_artifact_tree.py" \
