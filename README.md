@@ -85,6 +85,14 @@ rotations. A new model therefore never depends on prepublished upstream
 candidates. No result claim is made until the untouched validation endpoint is
 sealed.
 
+The progressive-state experiment is wired through a second whole-layer
+selector that compares native source-state MCG candidates with model-derived
+progressive-state MCG candidates. It selects swaps only on one 2,048-token row
+and reserves the other nine rows for the endpoint. This makes candidate family
+an executable choice inside the process without changing any K3/K4 rate. It is
+an intermediate candidate-quality gate; matrix-level joint factory-plus-rate
+selection still requires the common Shapley/Fisher scorer and coupled allocator.
+
 ## Base-model causal allocation result
 
 The full two-level Aumann–Shapley/Fisher arm is now measured. At the identical

@@ -135,9 +135,23 @@ uses `rebase_qwen_allocation_candidate_factory.py` to preserve every K3/K4
 choice from the already validated full causal allocation while rebinding its
 payload bytes and reconstruction hashes to the progressive factory. This
 frozen-rate rebase isolates candidate quality at the Shapley-selected rates.
-Only after that ablation may the progressive candidates enter common scoring
-and joint factory-plus-rate allocation. `build_qwen_candidate_inventory.py`
-constructs the immutable, prefix-aware Hub inventory needed for both steps.
+`measure_qwen_mcg_factory_union.py` then makes candidate family selectable at
+whole-layer granularity: row 0 directly scores each progressive layer swap
+against the native source-state MCG allocation, a greedy replay fixes the
+assembled union, and rows 1 through 9 remain untouched until final validation.
+Both arms use the identical BF16 parent, exact per-matrix K3/K4 choices,
+non-expert weights, SDPA teacher logits, token panel, and KLD arithmetic. This
+is an executable model-derived factory selector; it does not depend on a
+historical TurboDerp candidate list.
+
+That whole-layer gate still freezes rates and therefore does not establish a
+joint matrix-level factory-plus-rate allocation. Only after the frozen-rate
+and whole-layer ablations may progressive candidates enter the common
+Shapley/Fisher scoring and coupled exact-byte allocator described below.
+`build_qwen_candidate_inventory.py` constructs the immutable, prefix-aware Hub
+inventory needed for all three steps. The resumable
+`run_qwen_progressive_candidate_validation.sh` driver enforces this order and
+seals the resulting validation tree.
 
 ## Matrix-level candidate ledger
 
