@@ -7,10 +7,13 @@ release checklist, not an additional result claim.
 ## Current state
 
 - Review branch: `publish/v0.2`.
-- The committed precursor branch is already mirrored as
-  `github/publish/v0.2`; there is no open pull request.
+- Release commit:
+  `53d5cbf2ec977a33a92cbd31368885d015174f19`.
+- GitHub pull request:
+  [`brandonmmusic-max/shapleymcg#1`](https://github.com/brandonmmusic-max/shapleymcg/pull/1),
+  `publish/v0.2` into `main`.
 - The final method, result-ledger, claim-boundary, and fail-closed runtime
-  rewrite remains uncommitted and has not been pushed.
+  rewrite is committed and pushed for owner review; it has not been merged.
 - The rented B200 instance was deleted after the completed experiment. This
   release does not require or authorize another model run.
 
@@ -51,8 +54,9 @@ method changes separately from result claims and release plumbing.
 | Normalized result and publication machinery | `scripts/build_results_ledger.py`, `src/quant_pipeline/results/`, `results/RESULTS_LEDGER.json`, `results/canonical-supplemental-results.json`, `scripts/upload_sealed_artifact_tree_hf.py`, and `scripts/verify_hf_artifact_tree.py` | Migrates the preserved results without strengthening their evidence status and requires immutable identities for publication/verification. |
 | Offline regression coverage | `.github/workflows/tests.yml` and the modified/new files under `tests/` | Exercises corpus roles, orchestration, candidate identity/allocation, ledger determinism, and fail-closed Hub publication using synthetic artifacts and mocked Hub calls. It is software evidence only, not renewed model-quality evidence. |
 
-The untracked `uv.lock` is user-owned and is excluded from this proposed
-release. No file in this review map has been staged, committed, or pushed.
+The untracked `uv.lock` and local-only PR-body file are excluded from the
+release commit. The 67 paths in this review map are committed and pushed only
+to `publish/v0.2` for review.
 
 ## Claims approved by the evidence structure
 
@@ -110,10 +114,10 @@ evidence.
 
 ## Owner decision checklist
 
-The proposed release currently contains 67 changed paths: 55 tracked
+The release commit contains 67 changed paths: 55 tracked
 modifications and 12 new paths. The separate untracked `uv.lock` and the
 local-only PR body are not part of
-that count or this release. Approval can be given by item rather than as an
+that count or the release. Approval can be given by item rather than as an
 all-or-nothing instruction.
 
 - [ ] **Claims:** approve the four bounded claims above and the explicit
@@ -127,11 +131,11 @@ all-or-nothing instruction.
 - [ ] **Implementation:** approve the five-role corpus changes, concrete Qwen
   campaign wiring, fail-closed allocation installation, generic candidate
   infrastructure, and normalized result-ledger machinery summarized above.
-- [ ] **Software validation:** authorize the offline repository unit/integrity
-  suite. This does not authorize a checkpoint download, GPU run, KLD rerun, or
-  cloud instance.
-- [ ] **GitHub publication:** after validation passes, authorize committing the
-  reviewed paths, pushing `publish/v0.2`, and opening a pull request to `main`.
+- [x] **Software validation:** the authorized offline repository
+  unit/integrity suite passed 310 tests. No checkpoint download, GPU run, KLD
+  rerun, or cloud instance was used.
+- [x] **GitHub publication:** the reviewed paths were committed, pushed to
+  `publish/v0.2`, and opened as PR #1 to `main` for owner review.
 - [ ] **Hugging Face documentation publication:** after GitHub review,
   authorize publishing only the normalized ledger and updated documentation to
   the named dataset repositories. Immutable evidence revisions remain
@@ -145,19 +149,17 @@ changes. Publication requires the corresponding explicit checklist items.
 
 The project is not release-complete until all of these occur:
 
-1. The owner reviews the uncommitted diff and approves its claim language,
-   implementation changes, and attribution.
-2. The agreed local test scope is executed. If model experiments remain frozen,
-   this should at minimum include the repository unit/integrity suite; it must
-   not be represented as renewed model-quality evidence.
-3. The approved changes are committed and pushed to `publish/v0.2`.
-4. A pull request to `main` is opened and its rendered Markdown and CI results
-   are reviewed.
-5. The normalized result ledger and updated dataset-card documentation are
-   published to the intended Hugging Face repositories without modifying the
-   immutable evidence revisions cited above.
-6. The new GitHub and Hugging Face revisions are recorded, and every published
-   link, manifest, and receipt is verified at those revisions.
+1. The owner reviews PR #1 and approves its claim language, implementation
+   changes, attribution, and rendered Markdown.
+2. GitHub Actions completes successfully and the owner decides whether to merge
+   PR #1 into `main`.
+3. If separately authorized, the normalized result ledger and updated
+   dataset-card documentation are published to the intended Hugging Face
+   repositories without modifying the immutable evidence revisions cited
+   above.
+4. The final GitHub and any new Hugging Face revisions are recorded, and every
+   published link, manifest, and receipt is verified at those revisions.
 
 Until those gates close, the correct status is **scientific artifacts preserved;
-final repository release awaiting owner review and publication**.
+GitHub PR open for owner review; Hugging Face documentation publication not yet
+authorized**.
