@@ -399,7 +399,7 @@ model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype="auto", devic
 - Routed Fisher/Jacobian attribution, exact-rate reconciliation, and MCG
   integration are described and attributed in the GitHub methodology and
   sealed dataset card.
-- Experiment, integration, and publication: Brandon Music / ShapleyMCG.
+- Experiment, integration, and publication: Brandon M. Music / ShapleyMCG.
 """
 
 

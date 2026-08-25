@@ -15,8 +15,10 @@ Two different claims require two different controls.
    candidates under its own progressive state.
 
 The full ShapleyMCG allocation first beat the predecessor allocation by
-3.322359% inside the reconstructed TurboDerp K3/K4 pool. The subsequent strict
-v0.0.1-rule comparison below now establishes the allocator claim as well.
+3.322359% inside the reconstructed TurboDerp K3/K4 pool. The subsequent
+v0.0.1-rule comparison below supplies strong matched evidence for the allocator
+claim. Strict promotion remains conditional on attaching the independent
+logit-level replay receipt required by the gate below.
 
 ## TurboDerp v0.0.1 calibration and conversion audit
 
@@ -90,8 +92,11 @@ seed 20260824 gave a 95% interval of
 above zero. The sealed comparison SHA-256 is
 `85376441fc6279a3d17549921f310d1247ee39810bcbf7fe8e3e8c35f602bc65`.
 
-This passes the allocator-superiority gate over common candidate bytes. It
-does not satisfy the separate native-mixed-checkpoint claim in experiment C.
+This passes the measured effect-size and paired-bootstrap portions of the
+allocator-superiority gate over common candidate bytes. The checked-in bundle
+does not yet attach the required independent logit-level replay receipt. It
+also does not satisfy the separate native-mixed-checkpoint claim in experiment
+C.
 
 ### B. Calibration-data versus state-propagation factorial
 

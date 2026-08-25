@@ -64,6 +64,7 @@ class CodecProvider(Protocol):
 @runtime_checkable
 class EvaluatorProvider(Protocol):
     def attribute(self, context: Mapping[str, Any]) -> Mapping[str, Any]: ...
+    def confirm(self, context: Mapping[str, Any]) -> Mapping[str, Any]: ...
     def reanchor(self, context: Mapping[str, Any]) -> Mapping[str, Any]: ...
     def capture_student(self, context: Mapping[str, Any]) -> Mapping[str, Any]: ...
     def final_kld(self, context: Mapping[str, Any]) -> Mapping[str, Any]: ...
@@ -364,6 +365,65 @@ def _independent_kld(
     }
     report["report_sha256"] = sha256_bytes(canonical_json(report))
     write_json(request.output_dir / "independent-kld.json", report)
+    return report, reference, capture
+
+
+def _independent_confirmation_kld(
+    request: StageRequest,
+    provider_result: Mapping[str, Any],
+) -> tuple[dict[str, Any], Path, Path]:
+    """Replay a post-freeze KLD gate on the prospective confirmation role."""
+
+    import numpy as np
+
+    from ..calibration.windows import verify_sealed_corpus
+    from ..scoring.kld import summarize, token_kld
+
+    reference = _resolve_result_file(request.output_dir, provider_result, "reference_file")
+    capture = _resolve_result_file(request.output_dir, provider_result, "capture_file")
+    corpus_path = Path(request.static_inputs["sealed_corpus"]["path"])
+    corpus = json.loads(corpus_path.read_text())
+    verify_sealed_corpus(corpus)
+    if corpus.get("schema") != "quant-pipeline.sealed-corpus.v2":
+        raise ValueError("confirmation gate requires the five-role sealed-corpus v2 schema")
+    windows = corpus["windows"]["confirmation"]
+    positions = sum(len(row["token_ids"]) - 1 for row in windows)
+    teacher = _load_logits(reference)
+    student = _load_logits(capture)
+    if teacher.shape != student.shape or teacher.shape[0] != positions:
+        raise ValueError("confirmation logits do not match the sealed prospective role")
+    values = token_kld(teacher, student)
+    values_path = request.output_dir / "independent-confirmation-token-kld.npy"
+    buffer = io.BytesIO()
+    np.save(buffer, values, allow_pickle=False)
+    atomic_write(values_path, buffer.getvalue())
+    summary = summarize(values)
+    objective = request.experiment_spec["document"]["objective"]
+    bootstrap = _bootstrap_mean(
+        values,
+        samples=int(objective.get("bootstrap_samples", 2000)),
+        seed=int(request.experiment_spec["document"]["corpus"].get("seed", 20260823)) + 1,
+    )
+    frozen = {
+        key: request.dependency_artifacts[key]["artifact_sha256"]
+        for key in ("candidates", "allocation")
+    }
+    report = {
+        "schema": "quant-pipeline.independent-confirmation-kld.v1",
+        "stage_id": request.stage_id,
+        "role": "confirmation",
+        "prospective_only": True,
+        "sealed_corpus_sha256": request.static_inputs["sealed_corpus"]["sha256"],
+        "frozen_candidate_and_allocation_artifacts": frozen,
+        "reference_sha256": sha256_file(reference),
+        "capture_sha256": sha256_file(capture),
+        "token_kld_sha256": sha256_file(values_path),
+        "prediction_positions": positions,
+        "summary": summary,
+        "bootstrap_mean": bootstrap,
+    }
+    report["report_sha256"] = sha256_bytes(canonical_json(report))
+    write_json(request.output_dir / "independent-confirmation-kld.json", report)
     return report, reference, capture
 
 
@@ -691,6 +751,26 @@ class QwenCampaignAdapter:
         elif kind == "allocation":
             result = dict(services.allocator.allocate(context))
             _resolve_result_file(request.output_dir, result, "allocation_file")
+        elif kind == "confirmation":
+            result = dict(services.evaluator.confirm(context))
+            independent, reference, capture = _independent_confirmation_kld(request, result)
+            threshold = float(config.get("confirmation_kld_threshold", -1))
+            if not threshold >= 0.0:
+                raise ValueError("confirmation gate requires a sealed non-negative confirmation_kld_threshold")
+            value = float(independent["summary"]["mean"])
+            metadata["gate"] = {
+                "passed": value <= threshold,
+                "metric": "kld",
+                "value": value,
+                "threshold": threshold,
+                "reference_sha256": sha256_file(reference),
+                "capture_sha256": sha256_file(capture),
+            }
+            metadata["gate_files"] = {
+                "reference": reference.relative_to(request.output_dir).as_posix(),
+                "capture": capture.relative_to(request.output_dir).as_posix(),
+            }
+            metadata["independent_confirmation_report_sha256"] = independent["report_sha256"]
         elif kind == "causal_encode":
             result = dict(services.codec.install(context))
             installed = _resolve_result_file(request.output_dir, result, "installed_manifest_file")

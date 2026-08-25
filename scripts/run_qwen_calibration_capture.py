@@ -15,9 +15,44 @@ ZERO_HASH = "0" * 64
 MODEL_REVISION = "1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9"
 
 
+def _capture_checkpoint_identity(path: Path, expected_revision: str) -> dict:
+    manifest_path = path.resolve()
+    manifest = json.loads(manifest_path.read_text())
+    if manifest.get("schema") != "quant-pipeline.qwen-validation-reconstruction-model.v1":
+        raise ValueError("capture checkpoint manifest is not a validation reconstruction manifest")
+    seal = manifest.get("manifest_sha256")
+    body = {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    if seal != sha256_bytes(canonical_json(body)):
+        raise ValueError("capture checkpoint manifest seal mismatch")
+    if manifest.get("source_revision") != expected_revision:
+        raise ValueError("capture checkpoint source revision mismatch")
+    identity = {
+        "schema": "quant-pipeline.qwen-capture-checkpoint-identity.v1",
+        "kind": "sealed-causal-reconstruction",
+        "source_revision": expected_revision,
+        "model_manifest_sha256": seal,
+        "model_manifest_file_sha256": sha256_file(manifest_path),
+        "allocation_sha256": manifest.get("allocation_sha256"),
+        "kld_report_sha256": manifest.get("kld_report_sha256"),
+        "model_logit_verification_sha256": manifest.get("model_logit_verification_sha256"),
+    }
+    identity["capture_checkpoint_sha256"] = sha256_bytes(canonical_json(identity))
+    return identity
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-checkpoint", type=Path, required=True)
+    parser.add_argument(
+        "--capture-checkpoint",
+        type=Path,
+        help="optional sealed reconstruction used only to generate routed calibration states",
+    )
+    parser.add_argument(
+        "--capture-checkpoint-manifest",
+        type=Path,
+        help="required sealed model-manifest.json when --capture-checkpoint differs from source",
+    )
     parser.add_argument("--sealed-corpus", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--model-revision", default=MODEL_REVISION)
@@ -34,11 +69,18 @@ def main() -> int:
     parser.add_argument("--max-inflight-chunks", type=int, default=96)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
+    if (args.capture_checkpoint is None) != (args.capture_checkpoint_manifest is None):
+        parser.error("--capture-checkpoint and --capture-checkpoint-manifest must be supplied together")
+    capture_identity = (
+        None
+        if args.capture_checkpoint_manifest is None
+        else _capture_checkpoint_identity(args.capture_checkpoint_manifest, args.model_revision)
+    )
     root = args.output_dir.resolve()
     capture_specs = {
         "fit": {"role": "fit", "fisher_rank": 0},
         "heldout": {"role": "selection", "fisher_rank": args.fisher_rank},
-        "conditional_down": {"role": "confirmation", "fisher_rank": 0},
+        "conditional_down": {"role": "conditional_fit", "fisher_rank": 0},
     }
     purposes = tuple(item.strip() for item in args.purposes.split(",") if item.strip())
     if not purposes or len(set(purposes)) != len(purposes) or any(item not in capture_specs for item in purposes):
@@ -46,6 +88,10 @@ def main() -> int:
     plan = {
         "schema": "quant-pipeline.qwen-calibration-capture-plan.v1",
         "source_checkpoint": str(args.source_checkpoint.resolve()),
+        "capture_checkpoint": (
+            None if args.capture_checkpoint is None else str(args.capture_checkpoint.resolve())
+        ),
+        "capture_checkpoint_identity": capture_identity,
         "sealed_corpus": str(args.sealed_corpus.resolve()),
         "output_dir": str(root),
         "model_revision": args.model_revision,
@@ -87,6 +133,8 @@ def main() -> int:
         production_geometry=True,
         writer_workers=args.writer_workers,
         max_inflight_chunks=args.max_inflight_chunks,
+        capture_checkpoint=args.capture_checkpoint,
+        capture_checkpoint_identity=capture_identity,
     )
     body = {
         **{key: value for key, value in plan.items() if key != "dry_run"},

@@ -28,9 +28,11 @@ def test_packing_preserves_every_source_row_in_one_axis_bucket(tmp_path):
     document = MODULE.prepare(source, output, receipt, expected, 17)
 
     packed = [json.loads(line) for line in output.read_text().splitlines()]
-    assert len(packed) == 16
+    assert len(packed) == 20
     assert {row["domain"] for row in packed} == {f"axis-{axis}" for axis in range(4)}
     assert sum(row["source_rows"] for row in document["aggregates"]) == len(rows)
+    assert document["schema"] == "quant-pipeline.reap-recall-packed-corpus.v2"
+    assert document["method"]["buckets_per_axis"] == 5
     assert document["output"]["sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
     assert json.loads(receipt.read_text()) == document
 

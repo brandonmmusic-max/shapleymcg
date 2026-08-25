@@ -95,6 +95,7 @@ def test_tiny_real_qwen_native_path_gradient_fisher_closure_and_tamper(tmp_path)
         float(arrays["measured_layer_damage"][0]),
         arrays["projected_expert_residuals"][0],
         projected_routing_residual=arrays["projected_routing_residuals"][0],
+        observation_weights=arrays["path_quadrature_weights"],
     )
     assert split["closed_total"] == pytest.approx(float(arrays["measured_layer_damage"][0]), abs=1e-18)
     assert split["routing_state_shift"] == pytest.approx(0.0, abs=1e-18)
@@ -105,7 +106,10 @@ def test_tiny_real_qwen_native_path_gradient_fisher_closure_and_tamper(tmp_path)
     assert document["sum_reconciled_expert_damage"] == pytest.approx(
         arrays["measured_end_to_end_delta"].item(), abs=1e-15
     )
-    assert sum(document["layers"][0]["expert_direct_reconciled"]) == pytest.approx(
+    assert sum(document["layers"][0]["expert_allocation_score_reconciled"]) == pytest.approx(
+        document["layers"][0]["reconciled_layer_damage"], abs=1e-15
+    )
+    assert document["layers"][0]["reconciled_component_total"] == pytest.approx(
         document["layers"][0]["reconciled_layer_damage"], abs=1e-15
     )
 
@@ -133,12 +137,14 @@ def test_tiny_real_qwen_native_path_gradient_fisher_closure_and_tamper(tmp_path)
 
 
 def test_hf_uniform_k4_production_provenance_is_sealed_and_fail_closed(tmp_path):
-    nodes, _weights = np.polynomial.legendre.leggauss(2)
+    nodes, weights = np.polynomial.legendre.leggauss(2)
     nodes = (nodes + 1.0) / 2.0
+    weights = weights / 2.0
     arrays = {
         "layer_indices": np.asarray([0], dtype=np.int32),
         "layer_deltas": np.ones((1, 1), dtype=np.float64),
         "path_nodes": nodes,
+        "path_quadrature_weights": weights,
         "path_gradients": np.full((2, 1, 1), 0.2, dtype=np.float64),
         "node_kld": np.asarray([0.04, 0.16], dtype=np.float64),
         "projected_expert_residuals": np.zeros((1, 2, 2, 1), dtype=np.float64),

@@ -173,6 +173,7 @@ def _capture_request_identity(
     seed: int,
     model_revision: str | None,
     replay_report: Mapping[str, Any] | None,
+    capture_checkpoint_identity: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     if not isinstance(role, str) or not role:
         raise ValueError("capture role must be a non-empty string")
@@ -187,6 +188,26 @@ def _capture_request_identity(
             raise ValueError("installed replay report is malformed or unsealed")
         if replay.get("requested_predecessor_state_hash") != predecessor_state_hash:
             raise ValueError("installed replay targets a different predecessor state")
+    capture_checkpoint = None
+    if capture_checkpoint_identity is not None:
+        capture_checkpoint = dict(capture_checkpoint_identity)
+        capture_seal = _require_hash(
+            capture_checkpoint.get("capture_checkpoint_sha256"),
+            "capture checkpoint identity",
+        )
+        capture_body = {
+            key: value
+            for key, value in capture_checkpoint.items()
+            if key != "capture_checkpoint_sha256"
+        }
+        if (
+            capture_checkpoint.get("schema")
+            != "quant-pipeline.qwen-capture-checkpoint-identity.v1"
+            or sha256_bytes(canonical_json(capture_body)) != capture_seal
+        ):
+            raise ValueError("capture checkpoint identity is malformed or unsealed")
+        if capture_checkpoint.get("source_revision") != model_revision:
+            raise ValueError("capture checkpoint derives from a different source revision")
     body = {
         "schema": "quant-pipeline.qwen-routed-capture-request.v1",
         "role": role,
@@ -198,6 +219,7 @@ def _capture_request_identity(
         "seed": int(seed),
         "model_revision": model_revision,
         "installed_replay": replay,
+        "capture_checkpoint": capture_checkpoint,
         "windows": [
             {
                 "window_index": index,
@@ -514,6 +536,7 @@ def capture_loaded_qwen(
     production_geometry: bool = False,
     model_revision: str | None = None,
     replay_report: Mapping[str, Any] | None = None,
+    capture_checkpoint_identity: Mapping[str, Any] | None = None,
     writer_workers: int = 1,
     max_inflight_chunks: int | None = None,
 ) -> dict[str, Any]:
@@ -552,6 +575,7 @@ def capture_loaded_qwen(
         seed=seed,
         model_revision=model_revision,
         replay_report=replay_report,
+        capture_checkpoint_identity=capture_checkpoint_identity,
     )
     if (root / "capture-manifest.json").exists():
         return verify_capture_manifest(root, expected_request_sha256=request_identity["request_sha256"])
@@ -790,6 +814,8 @@ def capture_moe_from_local_bf16(
     production_geometry: bool = True,
     writer_workers: int = 1,
     max_inflight_chunks: int | None = None,
+    capture_checkpoint: str | Path | None = None,
+    capture_checkpoint_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Single-role compatibility wrapper over the one-load multi-role path."""
 
@@ -812,6 +838,8 @@ def capture_moe_from_local_bf16(
         production_geometry=production_geometry,
         writer_workers=writer_workers,
         max_inflight_chunks=max_inflight_chunks,
+        capture_checkpoint=capture_checkpoint,
+        capture_checkpoint_identity=capture_checkpoint_identity,
     )["capture"]
 
 
@@ -830,6 +858,8 @@ def capture_roles_from_local_bf16(
     production_geometry: bool = True,
     writer_workers: int = 1,
     max_inflight_chunks: int | None = None,
+    capture_checkpoint: str | Path | None = None,
+    capture_checkpoint_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Load/replay one immutable model and capture all disjoint corpus roles."""
 
@@ -846,6 +876,17 @@ def capture_roles_from_local_bf16(
     source = Path(source_checkpoint).resolve()
     if not source.is_dir() or source.is_symlink():
         raise ValueError("source_checkpoint must be a local immutable directory")
+    capture_source = (
+        source
+        if capture_checkpoint is None
+        else Path(capture_checkpoint).resolve()
+    )
+    if not capture_source.is_dir() or capture_source.is_symlink():
+        raise ValueError("capture_checkpoint must be a local immutable directory")
+    if capture_source != source and capture_checkpoint_identity is None:
+        raise ValueError(
+            "a distinct capture checkpoint requires a sealed capture checkpoint identity"
+        )
     sealed = json.loads(Path(sealed_corpus).read_text())
     verify_sealed_corpus(sealed)
     requests = [dict(row) for row in captures]
@@ -858,7 +899,7 @@ def capture_roles_from_local_bf16(
         if not isinstance(row.get("output_dir"), str) or not row["output_dir"]:
             raise ValueError("multi-role capture requires an output directory per purpose")
     model = AutoModelForCausalLM.from_pretrained(
-        source,
+        capture_source,
         torch_dtype=torch.bfloat16,
         device_map=device_map,
         low_cpu_mem_usage=True,
@@ -889,6 +930,7 @@ def capture_roles_from_local_bf16(
             production_geometry=production_geometry,
             model_revision=model_revision,
             replay_report=replay,
+            capture_checkpoint_identity=capture_checkpoint_identity,
             writer_workers=writer_workers,
             max_inflight_chunks=max_inflight_chunks,
         )

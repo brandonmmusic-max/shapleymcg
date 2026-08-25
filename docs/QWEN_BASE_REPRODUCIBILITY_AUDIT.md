@@ -51,6 +51,27 @@ the earlier publication receipts. Its machine-readable record is
   The KLD procedure separately preserves the pinned WikiText-2 source prefix,
   Qwen token IDs, construction rules, and BF16 teacher logits.
 
+### GLM-to-Qwen lineage receipt
+
+The cross-model relationship above is sealed by
+[`lineage.json`](https://huggingface.co/datasets/brandonmusic/shapleymcg-qwen3-30b-a3b-reproducibility/blob/a77141740749a53ede41d96115ba911f5b569f76/results/qwen3-30b-a3b-base/progressive-candidate-v1/glm-lineage/lineage.json)
+at Base dataset revision
+`a77141740749a53ede41d96115ba911f5b569f76`.
+
+- Receipt schema: `quant-pipeline.qwen-glm-lineage.v1`
+- Downloaded receipt SHA-256:
+  `4e9ac680d13750ec2c5e1e1744701b788663db6d03323df0f2d59397b0909066`
+- Internal lineage seal:
+  `eadb5a8f579e7f40cd25ead031348c526cb6b6da0870e5a19fcb5eaf0831bee5`
+- Original GLM model revision:
+  `7c73450f05a151439d0f184f216b1eefcc394a31`
+- Referenced Qwen fixed-control dataset revision:
+  `c9c2b001dd943b8251fc0102ec76ab1b8d572219`
+
+The receipt proves byte identity for the calibration JSONL and binds the
+Qwen-native KLD control artifacts to their immutable revisions. It does not
+claim that GLM token IDs or logits were reused for Qwen.
+
 ## Immutable publication pins
 
 ### Reproducibility dataset

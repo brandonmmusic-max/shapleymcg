@@ -9,6 +9,7 @@ LOG_ROOT=${LOG_ROOT:-${RUN_ROOT}/logs}
 LAYERS=${LAYERS:-48}
 START_LAYER=${START_LAYER:-0}
 WAVE_SIZE=${WAVE_SIZE:-4}
+ENCODE_DEVICES=${ENCODE_DEVICES:-0,1}
 MODEL=${MODEL:-/models/Qwen3-30B-A3B-Base}
 SOURCE_RECEIPT=${SOURCE_RECEIPT:-${RUN_ROOT}/artifacts/qwen-source-receipt.json}
 SOURCE_ROOT=${SOURCE_ROOT:-${RUN_ROOT}/sources/corrected-r10-source/reproducibility/r10}
@@ -17,6 +18,18 @@ EXTENSION=${EXTENSION:-${RUN_ROOT}/encoding-site/exllamav3_ext.cpython-311-x86_6
 
 export PYTHONPATH="${CODE_ROOT}/src:${RUN_ROOT}/encoding-site${PYTHONPATH:+:${PYTHONPATH}}"
 mkdir -p "${OUTPUT_ROOT}" "${LOG_ROOT}"
+
+IFS=',' read -r -a encode_devices <<< "${ENCODE_DEVICES}"
+if ((${#encode_devices[@]} < 1)); then
+    printf 'ENCODE_DEVICES must contain at least one CUDA device\n' >&2
+    exit 2
+fi
+for device in "${encode_devices[@]}"; do
+    if [[ ! "${device}" =~ ^[0-9]+$ ]]; then
+        printf 'ENCODE_DEVICES must be a comma-separated list of CUDA indices\n' >&2
+        exit 2
+    fi
+done
 
 complete() {
     local layer=$1 label
@@ -29,7 +42,7 @@ complete() {
 launch() {
     local layer=$1 label gpu log exit_file
     label=$(printf '%03d' "${layer}")
-    gpu=$((layer % 2))
+    gpu=${encode_devices[$((layer % ${#encode_devices[@]}))]}
     log="${LOG_ROOT}/fast-encode-layer-${label}.log"
     exit_file="${LOG_ROOT}/fast-encode-layer-${label}.exit"
     if test -f "${exit_file}"; then

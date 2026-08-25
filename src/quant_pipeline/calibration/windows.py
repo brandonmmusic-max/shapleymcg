@@ -10,7 +10,8 @@ from typing import Callable, Iterable
 from ..core.artifacts import canonical_json, sha256_bytes, write_json
 
 
-ROLES = ("fit", "selection", "confirmation", "final")
+ROLES = ("fit", "conditional_fit", "selection", "confirmation", "final")
+LEGACY_ROLES = ("fit", "selection", "confirmation", "final")
 
 
 def read_documents(path: str | Path) -> list[dict]:
@@ -98,6 +99,8 @@ def seal_corpus(
     tokenizer_identity: dict,
     minimum_domains: int = 4,
 ) -> dict:
+    if set(role_limits) != set(ROLES):
+        raise ValueError(f"role limits must be exactly {ROLES}")
     documents = read_documents(input_jsonl)
     split = document_split(documents, seed)
     windows = {
@@ -111,10 +114,14 @@ def seal_corpus(
         if len(domains) < minimum_domains:
             raise ValueError(f"insufficient domain coverage for {role}: {len(domains)}/{minimum_domains}")
     ids = [{row["document_id"] for row in windows[role]} for role in ROLES]
-    if any(ids[i] & ids[j] for i in range(4) for j in range(i + 1, 4)):
+    if any(
+        ids[i] & ids[j]
+        for i in range(len(ids))
+        for j in range(i + 1, len(ids))
+    ):
         raise AssertionError("document leakage across corpus roles")
     artifact = {
-        "schema": "quant-pipeline.sealed-corpus.v1",
+        "schema": "quant-pipeline.sealed-corpus.v2",
         "seed": seed,
         "window_tokens": window_tokens,
         "minimum_domains": minimum_domains,
@@ -133,12 +140,16 @@ def verify_sealed_corpus(value: dict) -> None:
     body = {key: item for key, item in value.items() if key != "seal_sha256"}
     if not expected_seal or sha256_bytes(canonical_json(body)) != expected_seal:
         raise ValueError("sealed corpus body hash mismatch")
-    if set(value.get("windows", {})) != set(ROLES):
+    schema = value.get("schema")
+    roles = ROLES if schema == "quant-pipeline.sealed-corpus.v2" else LEGACY_ROLES
+    if schema not in {"quant-pipeline.sealed-corpus.v1", "quant-pipeline.sealed-corpus.v2"}:
+        raise ValueError("unsupported sealed corpus schema")
+    if set(value.get("windows", {})) != set(roles):
         raise ValueError("sealed corpus roles are incomplete")
     minimum_domains = int(value.get("minimum_domains", 1))
     role_counts = value.get("role_counts", {})
     document_sets = []
-    for role in ROLES:
+    for role in roles:
         windows = value["windows"][role]
         if int(role_counts.get(role, -1)) != len(windows) or not windows:
             raise ValueError(f"sealed corpus count mismatch for {role}")
@@ -151,5 +162,9 @@ def verify_sealed_corpus(value: dict) -> None:
                 raise ValueError(f"sealed corpus token hash mismatch for {role}")
             documents.add(window["document_id"])
         document_sets.append(documents)
-    if any(document_sets[i] & document_sets[j] for i in range(4) for j in range(i + 1, 4)):
+    if any(
+        document_sets[i] & document_sets[j]
+        for i in range(len(document_sets))
+        for j in range(i + 1, len(document_sets))
+    ):
         raise ValueError("sealed corpus document leakage across roles")

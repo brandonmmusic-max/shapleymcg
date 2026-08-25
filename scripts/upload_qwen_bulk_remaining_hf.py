@@ -170,6 +170,11 @@ def main() -> int:
     parser.add_argument("--run-root", type=Path, default=Path("/qwen-shapleymcg-run"))
     parser.add_argument("--token-file", type=Path, required=True)
     parser.add_argument("--kind", choices=("fit", "candidate"), required=True)
+    parser.add_argument(
+        "--path-prefix",
+        default="",
+        help="optional Hub namespace, for example candidate-factories/progressive-state-v1",
+    )
     parser.add_argument("--first-layer", type=int, default=0)
     parser.add_argument(
         "--layers",
@@ -198,6 +203,10 @@ def main() -> int:
         parser.error("--batch-layers must be positive")
     if args.first_layer < 0 or args.layers < 1 or args.first_layer + args.layers > 48:
         parser.error("requested layer interval must be within [0, 48)")
+    prefix_parts = [part for part in args.path_prefix.strip("/").split("/") if part]
+    if any(part in {".", ".."} for part in prefix_parts):
+        parser.error("--path-prefix cannot contain dot path components")
+    path_prefix = "/".join(prefix_parts)
     if args.kind == "candidate" and args.delete_verified and not _kld_succeeded(args.kld_exit):
         raise ValueError("refusing candidate deletion before successful KLD")
 
@@ -214,7 +223,12 @@ def main() -> int:
     else:
         data_root = run_root / "fast-encode"
         plural = "candidates"
-    receipt_root = run_root / "artifacts" / "hf-upload" / plural
+    remote_plural = f"{path_prefix}/{plural}" if path_prefix else plural
+    remote_receipts = f"{path_prefix}/receipts/{plural}" if path_prefix else f"receipts/{plural}"
+    receipt_root = run_root / "artifacts" / "hf-upload"
+    if path_prefix:
+        receipt_root = receipt_root.joinpath(*prefix_parts)
+    receipt_root = receipt_root / plural
     receipt_root.mkdir(parents=True, exist_ok=True)
     layer_roots = sorted(
         path
@@ -279,7 +293,7 @@ def main() -> int:
         for row in upload_rows:
             upload_operations.append(
                 CommitOperationAdd(
-                    path_in_repo=f"{plural}/{root.name}/{row['path']}",
+                    path_in_repo=f"{remote_plural}/{root.name}/{row['path']}",
                     path_or_fileobj=str(root / row["path"]),
                 )
             )
@@ -316,7 +330,7 @@ def main() -> int:
             api,
             args.repo_id,
             existing_revision,
-            plural,
+            remote_plural,
             batch,
         )
         if already_remote:
@@ -342,7 +356,7 @@ def main() -> int:
         )
         for layer_row in batch:
             root = layer_row["root"]
-            _verify_remote_layer(api, args.repo_id, revision, plural, layer_row)
+            _verify_remote_layer(api, args.repo_id, revision, remote_plural, layer_row)
             layer = int(layer_row["layer"])
             manifest = layer_row["manifest"]
             receipt = {
@@ -354,7 +368,7 @@ def main() -> int:
                 "repo_id": args.repo_id,
                 "repo_type": "dataset",
                 "revision": revision,
-                "path_in_repo": f"{plural}/layer-{layer:03d}",
+                "path_in_repo": f"{remote_plural}/layer-{layer:03d}",
                 "layer": layer,
                 "manifest_sha256": manifest["manifest_sha256"],
                 "file_count": manifest["file_count"],
@@ -392,7 +406,7 @@ def main() -> int:
 
     receipt_operations = [
         CommitOperationAdd(
-            path_in_repo=f"receipts/{plural}/{path.name}",
+            path_in_repo=f"{remote_receipts}/{path.name}",
             path_or_fileobj=str(path),
         )
         for path in sorted(receipt_root.glob("layer-[0-9][0-9][0-9].json"))
@@ -405,9 +419,9 @@ def main() -> int:
         retry_minutes=args.retry_minutes,
     )
     receipt_revision = str(receipt_commit.oid)
-    receipt_remote = _remote_files(api, args.repo_id, receipt_revision, f"receipts/{plural}")
+    receipt_remote = _remote_files(api, args.repo_id, receipt_revision, remote_receipts)
     for path in changed_receipts:
-        name = f"receipts/{plural}/{path.name}"
+        name = f"{remote_receipts}/{path.name}"
         _verify_file(receipt_remote.get(name), path, path.stat().st_size, sha256_file(path))
 
     if args.delete_verified:

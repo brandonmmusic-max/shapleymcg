@@ -1,0 +1,59 @@
+{
+  "schema": "quant-pipeline.qwen-candidate-factory-union-resume-provenance.v1",
+  "reason": "The first process exhausted the practical workspace quota after completing every single-layer swap and two greedy admissions. Selected candidate payloads were moved byte-for-byte to the root artifact volume and the run resumed from the append-only log.",
+  "historical_plan": {
+    "path": "candidate-factory-union-v1/plan.json",
+    "file_sha256": "55947a265dd146863cb57163f5843218cda91719b67b8647579f4e2b62ef426f",
+    "original_candidate_cache": "/workspace/shapleymcg-factory-union-v1/cache"
+  },
+  "original_execution_log": {
+    "source_path": "/workspace/shapleymcg-factory-union-v1/logs/factory-union.log",
+    "bytes": 47795,
+    "sha256": "367225ba803048c7219a2eb7725b25054d687cef3db6c920a1c84258db3ce32c"
+  },
+  "resume_execution_log": {
+    "source_path": "/workspace/shapleymcg-factory-union-v1/logs/factory-union.resume.log",
+    "bytes": 24911,
+    "sha256": "4f8489a787b876d1895e550fd57a9577535ae46e754321b34d382f03afdcf79b"
+  },
+  "resume_candidate_cache": "/artifacts/shapleymcg/qwen3-30b-a3b-post-v1/candidate-factory-cache-v1",
+  "resume_guards": [
+    "selection baseline logits reproduced bit-identically",
+    "all 48 single-layer token-KLD and token-delta vectors reproduced from saved logits",
+    "all saved hashes, means, and seeded block-bootstrap intervals verified before greedy selection continued"
+  ],
+  "retained_selected_candidates": [
+    {
+      "layer": 5,
+      "path": "retained-candidates/layer-005.safetensors",
+      "bytes": 2949038920,
+      "installed_layer_sha256": "84e3345535655695f576058267c56b8a9ca603e624a3eb2de3d1a2c5fcd9d9c1"
+    },
+    {
+      "layer": 32,
+      "path": "retained-candidates/layer-032.safetensors",
+      "bytes": 2949038920,
+      "installed_layer_sha256": "e1ddaa18bb389267e4e073d2ed8a16ce251ed96d344781be0a66b24e3ec6432b"
+    },
+    {
+      "layer": 34,
+      "path": "retained-candidates/layer-034.safetensors",
+      "bytes": 2949038920,
+      "installed_layer_sha256": "3d2a539630111f17f6c0c573e66a4706930f4cb795079141653821424acab592"
+    },
+    {
+      "layer": 40,
+      "path": "retained-candidates/layer-040.safetensors",
+      "bytes": 2949038920,
+      "installed_layer_sha256": "d7b0c9c4742de73612be362b46d772cb9d520fcfba1abfcd351c2c5309a725a5"
+    },
+    {
+      "layer": 46,
+      "path": "retained-candidates/layer-046.safetensors",
+      "bytes": 2949038920,
+      "installed_layer_sha256": "17776d83f98b18133e83dd0b77ad215a4864bc794ac905ab072bbe92b98199c4"
+    }
+  ],
+  "final_report_sha256": "1b8897431f07768405afc1d4d98d970acdec84733d2e3bacc49da301978492a1",
+  "independent_verification_sha256": "865d8f696b29cd5b84e51910fbf4fa4632082b44d63e67c973507d3c7dce3397"
+}

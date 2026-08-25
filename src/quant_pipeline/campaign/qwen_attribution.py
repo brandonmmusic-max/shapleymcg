@@ -31,13 +31,15 @@ from ..core.artifacts import canonical_json, sha256_bytes, sha256_file, write_js
 from ..evaluation.kld_window import verify_kld_window
 from ..scoring.attribution import (
     aumann_shapley,
+    reconcile_layer_components_for_allocation,
     reconcile_signed_completeness,
     split_layer_damage,
 )
 
 
 PROVISIONAL_SCHEMA = "quant-pipeline.qwen-provisional-decoded-deltas.v1"
-ATTRIBUTION_INPUT_SCHEMA = "quant-pipeline.qwen-native-causal-attribution-inputs.v1"
+ATTRIBUTION_INPUT_SCHEMA = "quant-pipeline.qwen-native-causal-attribution-inputs.v2"
+LEGACY_ATTRIBUTION_INPUT_SCHEMA = "quant-pipeline.qwen-native-causal-attribution-inputs.v1"
 _PROJECTIONS = ("gate_proj", "up_proj", "down_proj")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _REVISION = re.compile(r"[0-9a-f]{40}")
@@ -391,8 +393,9 @@ def measure_native_causal_attribution(
             raise ValueError("sealed teacher logits do not align with attribution token positions")
     teacher_log = torch.log_softmax(teacher, dim=-1).detach()
     teacher_probability = teacher_log.exp()
-    nodes, _weights = np.polynomial.legendre.leggauss(path_nodes)
+    nodes, path_quadrature_weights = np.polynomial.legendre.leggauss(path_nodes)
     nodes = (nodes + 1.0) / 2.0
+    path_quadrature_weights = path_quadrature_weights / 2.0
     path_gradients = np.zeros((path_nodes, len(layers), 1), dtype=np.float64)
     projected = np.zeros((len(layers), int(model.config.num_experts), path_nodes, fisher_rank), dtype=np.float64)
     projected_routing = np.zeros((len(layers), path_nodes, fisher_rank), dtype=np.float64)
@@ -486,6 +489,7 @@ def measure_native_causal_attribution(
         "layer_indices": np.asarray(layers, dtype=np.int32),
         "layer_deltas": layer_deltas,
         "path_nodes": np.asarray(nodes, dtype=np.float64),
+        "path_quadrature_weights": np.asarray(path_quadrature_weights, dtype=np.float64),
         "path_gradients": path_gradients,
         "node_kld": node_kld,
         "projected_expert_residuals": projected,
@@ -509,40 +513,38 @@ def build_hierarchical_attribution_document(
     measured = float(arrays["measured_end_to_end_delta"][0])
     raw_layers = np.asarray(arrays["measured_layer_damage"], dtype=np.float64)
     layer_accounting = reconcile_signed_completeness(raw_layers, measured)
+    path_weights = np.asarray(arrays["path_quadrature_weights"], dtype=np.float64)
     layers = []
     for index, layer in enumerate(arrays["layer_indices"]):
         split = split_layer_damage(
             float(raw_layers[index]),
             arrays["projected_expert_residuals"][index],
             projected_routing_residual=arrays["projected_routing_residuals"][index],
+            observation_weights=path_weights,
         )
-        expert_accounting = reconcile_signed_completeness(
-            split["expert_direct"],
-            float(layer_accounting.reconciled[index]),
+        raw_layer = float(raw_layers[index])
+        reconciled_layer = float(layer_accounting.reconciled[index])
+        components = reconcile_layer_components_for_allocation(
+            expert_direct=split["expert_direct"],
+            routing_state_shift=split["routing_state_shift"],
+            explicit_residual=split["unresolved_nonlinear_remainder"],
+            raw_layer_damage=raw_layer,
+            reconciled_layer_damage=reconciled_layer,
         )
         layers.append({
             "layer_index": int(layer),
-            "aumann_shapley_raw": float(raw_layers[index]),
-            "reconciled_layer_damage": float(layer_accounting.reconciled[index]),
-            "layer_completeness_scale": (
-                float(layer_accounting.reconciled[index]) / float(raw_layers[index])
-                if float(raw_layers[index]) != 0.0 else None
-            ),
+            "aumann_shapley_raw": raw_layer,
+            "reconciled_layer_damage": reconciled_layer,
             "expert_direct_raw": split["expert_direct"],
-            "expert_direct_reconciled": expert_accounting.reconciled.tolist(),
-            "expert_completeness_scale": (
-                expert_accounting.measured_total / expert_accounting.raw_total
-            ),
-            "raw_expert_total": expert_accounting.raw_total,
-            "reconciled_expert_total": float(np.sum(expert_accounting.reconciled)),
             "routing_state_shift_raw": split["routing_state_shift"],
             "within_layer_unresolved_remainder_raw": split["unresolved_nonlinear_remainder"],
             "raw_joint_fisher_total": split["raw_total"],
+            **components,
         })
     reconciled_layer_total = float(sum(row["reconciled_layer_damage"] for row in layers))
     reconciled_expert_total = float(sum(row["reconciled_expert_total"] for row in layers))
     body = {
-        "schema": "quant-pipeline.qwen-hf-mcg-attribution.v3",
+        "schema": "quant-pipeline.qwen-hf-mcg-attribution.v4",
         "candidate_inventory_sha256": inventory_sha256,
         "path_nodes": int(len(arrays["path_nodes"])),
         "fisher_rank": int(arrays["projected_expert_residuals"].shape[-1]),
@@ -554,7 +556,8 @@ def build_hierarchical_attribution_document(
         "global_layer_completeness_scale": measured / layer_accounting.raw_total,
         "sum_reconciled_layer_damage": reconciled_layer_total,
         "sum_reconciled_expert_damage": reconciled_expert_total,
-        "closure_policy": "signed-proportional-two-level-completeness-v1",
+        "closure_policy": "signed-layer-completeness-plus-explicit-within-layer-components-v2",
+        "expert_score_policy": "direct-evidence-plus-explicit-nonexpert-redistribution-for-allocation-only-v1",
         "raw_evidence_is_preserved": True,
         "layers": layers,
     }
@@ -607,7 +610,8 @@ def verify_attribution_inputs(path: str | Path) -> tuple[dict[str, np.ndarray], 
     if not target.is_file() or target.is_symlink() or not receipt_path.is_file() or receipt_path.is_symlink():
         raise ValueError("native attribution archive or receipt is missing")
     receipt = json.loads(receipt_path.read_text())
-    if receipt.get("schema") != ATTRIBUTION_INPUT_SCHEMA:
+    schema = receipt.get("schema")
+    if schema not in {ATTRIBUTION_INPUT_SCHEMA, LEGACY_ATTRIBUTION_INPUT_SCHEMA}:
         raise ValueError("unsupported native attribution input receipt")
     seal = _require_hash(receipt.get("receipt_sha256"), "native attribution receipt")
     if _hash_json({key: value for key, value in receipt.items() if key != "receipt_sha256"}) != seal:
@@ -630,8 +634,11 @@ def verify_attribution_inputs(path: str | Path) -> tuple[dict[str, np.ndarray], 
             raise ValueError("native attribution array identity mismatch")
         if not np.isfinite(value).all():
             raise ValueError("native attribution archive contains non-finite values")
+    if schema == LEGACY_ATTRIBUTION_INPUT_SCHEMA and "path_quadrature_weights" not in arrays:
+        _legacy_nodes, legacy_weights = np.polynomial.legendre.leggauss(len(arrays["path_nodes"]))
+        arrays["path_quadrature_weights"] = np.asarray(legacy_weights / 2.0, dtype=np.float64)
     required = {
-        "layer_indices", "layer_deltas", "path_nodes", "path_gradients", "node_kld",
+        "layer_indices", "layer_deltas", "path_nodes", "path_quadrature_weights", "path_gradients", "node_kld",
         "projected_expert_residuals", "projected_routing_residuals", "measured_layer_damage",
         "source_kld", "candidate_kld", "measured_end_to_end_delta",
     }
@@ -642,10 +649,15 @@ def verify_attribution_inputs(path: str | Path) -> tuple[dict[str, np.ndarray], 
     layer_indices = arrays["layer_indices"]
     if layer_indices.dtype.kind not in "iu" or layers < 1 or np.any(layer_indices < 0) or np.any(np.diff(layer_indices) <= 0):
         raise ValueError("native attribution layer indices must be unique increasing integers")
-    expected_nodes, _weights = np.polynomial.legendre.leggauss(nodes)
+    expected_nodes, expected_weights = np.polynomial.legendre.leggauss(nodes)
     expected_nodes = (expected_nodes + 1.0) / 2.0
+    expected_weights = expected_weights / 2.0
     if nodes < 2 or not np.array_equal(arrays["path_nodes"], expected_nodes):
         raise ValueError("native attribution path nodes are not canonical Gauss-Legendre order")
+    if arrays["path_quadrature_weights"].shape != (nodes,) or not np.array_equal(
+        arrays["path_quadrature_weights"], expected_weights
+    ):
+        raise ValueError("native attribution quadrature weights are not canonical Gauss-Legendre weights")
     if arrays["layer_deltas"].shape != (layers, 1) or arrays["path_gradients"].shape != (nodes, layers, 1):
         raise ValueError("native attribution layer/path geometry mismatch")
     if not np.array_equal(arrays["layer_deltas"], np.ones((layers, 1), dtype=np.float64)):

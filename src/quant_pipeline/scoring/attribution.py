@@ -30,7 +30,10 @@ def aumann_shapley(
     return result
 
 
-def quadratic_expert_attribution(projected_residuals: np.ndarray) -> np.ndarray:
+def quadratic_expert_attribution(
+    projected_residuals: np.ndarray,
+    observation_weights: np.ndarray | Sequence[float] | None = None,
+) -> np.ndarray:
     """Signed expert shares that close exactly to 0.5*||sum(z_e)||^2.
 
     Each z_e may already include the downstream Fisher/Jacobian square-root
@@ -41,8 +44,25 @@ def quadratic_expert_attribution(projected_residuals: np.ndarray) -> np.ndarray:
     if z.ndim < 2:
         raise ValueError("expected [experts, observations...] residuals")
     total = np.sum(z, axis=0)
+    observations = z.shape[1:]
+    if observation_weights is None:
+        weights = np.ones(observations, dtype=np.float64)
+    else:
+        supplied = np.asarray(observation_weights, dtype=np.float64)
+        if supplied.ndim == 1 and len(observations) > 1 and supplied.shape[0] == observations[0]:
+            supplied = supplied.reshape((observations[0],) + (1,) * (len(observations) - 1))
+        try:
+            weights = np.broadcast_to(supplied, observations).astype(np.float64, copy=False)
+        except ValueError as error:
+            raise ValueError("observation weights do not broadcast to projected residuals") from error
+    if not np.isfinite(weights).all() or np.any(weights < 0.0):
+        raise ValueError("observation weights must be finite and nonnegative")
+    mass = float(np.sum(weights))
+    if mass <= 0.0:
+        raise ValueError("observation weights must have positive mass")
+    normalized = weights / mass
     axes = tuple(range(1, z.ndim))
-    return 0.5 * np.mean(z * total, axis=axes)
+    return 0.5 * np.sum(z * total * normalized, axis=axes)
 
 
 def conditional_quadratic_damage(current: np.ndarray, candidates: np.ndarray) -> np.ndarray:
@@ -118,11 +138,76 @@ def reconcile_explicit_remainder(raw: Sequence[float], measured_total: float) ->
     )
 
 
+def reconcile_layer_components_for_allocation(
+    *,
+    expert_direct: Sequence[float],
+    routing_state_shift: float,
+    explicit_residual: float,
+    raw_layer_damage: float,
+    reconciled_layer_damage: float,
+) -> dict:
+    """Preserve component closure and derive a separately labelled expert score.
+
+    Direct expert evidence, routing/backend shift, and the explicit residual
+    are all scaled by the same independently measured layer-completeness
+    factor.  The non-expert components remain visible.  Only the allocation
+    score redistributes them over experts, by absolute direct magnitude (or
+    uniformly when every direct term is zero), so that an expert-only
+    optimizer has a closing objective without disguising the redistribution
+    as measured expert evidence.
+    """
+
+    direct_raw = np.asarray(expert_direct, dtype=np.float64)
+    if direct_raw.ndim != 1 or not len(direct_raw) or not np.isfinite(direct_raw).all():
+        raise ValueError("layer component reconciliation requires finite expert-direct values")
+    raw_layer = float(raw_layer_damage)
+    reconciled_layer = float(reconciled_layer_damage)
+    route_raw = float(routing_state_shift)
+    residual_raw = float(explicit_residual)
+    if not all(np.isfinite(value) for value in (raw_layer, reconciled_layer, route_raw, residual_raw)):
+        raise ValueError("layer component reconciliation requires finite scalar components")
+    tolerance = max(1e-15, abs(raw_layer) * 1e-12)
+    if abs(float(np.sum(direct_raw)) + route_raw + residual_raw - raw_layer) > tolerance:
+        raise ValueError("raw expert, route, and residual components do not close to raw layer damage")
+    if raw_layer == 0.0:
+        if reconciled_layer != 0.0:
+            raise ValueError("zero raw layer damage cannot reconcile to a nonzero layer share")
+        scale = 0.0
+    else:
+        scale = reconciled_layer / raw_layer
+    direct = direct_raw * scale
+    route = route_raw * scale
+    residual = residual_raw * scale
+    nonexpert = route + residual
+    magnitude = np.abs(direct)
+    if float(np.sum(magnitude)) > 0.0:
+        redistribution = magnitude / float(np.sum(magnitude))
+        policy = "absolute-direct-magnitude-proportional-v1"
+    else:
+        redistribution = np.full(len(direct), 1.0 / len(direct))
+        policy = "uniform-when-direct-magnitude-is-zero-v1"
+    allocation = direct + nonexpert * redistribution
+    allocation[int(np.argmax(np.abs(allocation)))] += reconciled_layer - float(np.sum(allocation))
+    return {
+        "layer_completeness_scale": scale,
+        "expert_direct_reconciled": direct.tolist(),
+        "reconciled_expert_direct_total": float(np.sum(direct)),
+        "routing_state_shift_reconciled": route,
+        "within_layer_unresolved_remainder_reconciled": residual,
+        "reconciled_component_total": float(np.sum(direct) + route + residual),
+        "expert_allocation_score_reconciled": allocation.tolist(),
+        "expert_redistribution_policy": policy,
+        "redistributed_nonexpert_total": nonexpert,
+        "reconciled_expert_total": float(np.sum(allocation)),
+    }
+
+
 def split_layer_damage(
     measured_layer_damage: float,
     projected_expert_residuals: np.ndarray,
     routing_state_shift: float = 0.0,
     projected_routing_residual: np.ndarray | None = None,
+    observation_weights: np.ndarray | Sequence[float] | None = None,
 ) -> dict:
     expert = np.asarray(projected_expert_residuals, dtype=np.float64)
     if projected_routing_residual is not None:
@@ -130,17 +215,18 @@ def split_layer_damage(
         if routing.shape != expert.shape[1:]:
             raise ValueError("projected routing residual must match one expert residual observation shape")
         joint = np.concatenate([expert, routing[None]], axis=0)
-        shares = quadratic_expert_attribution(joint)
+        shares = quadratic_expert_attribution(joint, observation_weights)
         direct = shares[:-1]
         routing_state_shift = float(shares[-1])
     else:
-        direct = quadratic_expert_attribution(expert)
+        direct = quadratic_expert_attribution(expert, observation_weights)
     raw = np.concatenate([direct, np.asarray([routing_state_shift], dtype=np.float64)])
     accounting = reconcile_explicit_remainder(raw, measured_layer_damage)
     return {
         "expert_direct": direct.tolist(),
         "routing_state_shift": float(routing_state_shift),
         "unresolved_nonlinear_remainder": accounting.closure_residual,
+        "component_policy": "direct-plus-route-plus-explicit-residual-v1",
         "raw_total": accounting.raw_total,
         "measured_layer_damage": accounting.measured_total,
         "closed_total": float(np.sum(accounting.reconciled)),

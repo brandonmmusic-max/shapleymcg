@@ -31,6 +31,29 @@ from .ledger import (
     validate_ledger,
 )
 from .payload_store import ExactPayloadStore
+from .factory_union import (
+    CandidateFactory,
+    CandidateUnit,
+    CommonCandidateScore,
+    CommonCandidateScorer,
+    FactoryIdentity,
+    FactoryProposal,
+    FactoryUnion,
+    build_factory_union,
+)
+from .factory_calibration import (
+    FactoryDomainAnchor,
+    FactoryDeltaAnchor,
+    FactoryRateProxyEvidence,
+    ReanchoredFactoryScorer,
+    apply_factory_delta_calibration,
+    build_factory_domain_reanchor,
+    fit_factory_delta_calibration,
+)
+from .factory_allocation import (
+    CoupledFactoryAllocation,
+    allocate_factory_union,
+)
 
 __all__ = [
     "BackendAttestation",
@@ -62,4 +85,21 @@ __all__ = [
     "validate_candidate_record",
     "validate_ledger",
     "ExactPayloadStore",
+    "CandidateFactory",
+    "CandidateUnit",
+    "CommonCandidateScore",
+    "CommonCandidateScorer",
+    "FactoryIdentity",
+    "FactoryProposal",
+    "FactoryUnion",
+    "build_factory_union",
+    "FactoryDeltaAnchor",
+    "FactoryDomainAnchor",
+    "FactoryRateProxyEvidence",
+    "ReanchoredFactoryScorer",
+    "apply_factory_delta_calibration",
+    "build_factory_domain_reanchor",
+    "fit_factory_delta_calibration",
+    "CoupledFactoryAllocation",
+    "allocate_factory_union",
 ]

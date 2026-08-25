@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 import numpy as np
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,7 +61,9 @@ def test_shapley_fisher_bridge_preserves_exact_rate_and_payload_budget():
         "layers": [
             {
                 "layer_index": layer,
-                "expert_direct_reconciled": [float(1 + ((layer + expert) % 13)) for expert in range(128)],
+                "expert_allocation_score_reconciled": [
+                    float(1 + ((layer + expert) % 13)) for expert in range(128)
+                ],
             }
             for layer in range(48)
         ],
@@ -77,6 +80,17 @@ def test_shapley_fisher_bridge_preserves_exact_rate_and_payload_budget():
     assert result["stored_payload_bytes"] == control["stored_payload_bytes"]
     assert result["changed_matrix_count_vs_control"] > 0
     assert result["objective"].startswith("native-aumann-shapley-fisher")
+
+
+def test_shapley_fisher_bridge_rejects_direct_only_expert_scores():
+    module = _script("allocate_qwen_mcg_causal_exact_3p5.py")
+    with pytest.raises(ValueError, match="explicit expert allocation scores"):
+        module._direct_scores({
+            "layers": [{
+                "layer_index": 0,
+                "expert_direct_reconciled": [1.0] * 128,
+            }],
+        })
 
 
 def test_causal_measurement_kld_is_zero_for_identical_logits():

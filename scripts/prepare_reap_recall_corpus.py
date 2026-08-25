@@ -5,7 +5,8 @@ The source corpus contains many records shorter than the experiment's 2,048
 token window.  Packing is performed before target tokenization, within each
 original axis and deterministic bucket.  Every source row is assigned to one
 and only one aggregate document, so the downstream document splitter cannot
-leak source text between fit, selection, confirmation, and final roles.
+leak source text between fit, conditional-fit, selection, confirmation, and
+final roles.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA = "quant-pipeline.reap-recall-packed-corpus.v1"
+SCHEMA = "quant-pipeline.reap-recall-packed-corpus.v2"
 
 
 def canonical_json(value: Any) -> bytes:
@@ -52,18 +53,18 @@ def prepare(source: Path, output: Path, receipt: Path, expected_sha256: str, see
             axis = str(row["axis"])
             text = str(row["text"])
             key = hashlib.sha256(f"{seed}\0{axis}\0{line_number}".encode()).digest()
-            buckets[(axis, int.from_bytes(key[:8], "big") % 4)].append((line_number, text))
+            buckets[(axis, int.from_bytes(key[:8], "big") % 5)].append((line_number, text))
             source_rows += 1
 
     domains = sorted({axis for axis, _ in buckets})
-    if len(domains) != 4 or any((axis, bucket) not in buckets for axis in domains for bucket in range(4)):
-        raise ValueError("expected four populated deterministic buckets in each of four corpus axes")
+    if len(domains) != 4 or any((axis, bucket) not in buckets for axis in domains for bucket in range(5)):
+        raise ValueError("expected five populated deterministic buckets in each of four corpus axes")
 
     output.parent.mkdir(parents=True, exist_ok=True)
     aggregates = []
     with output.open("xb") as stream:
         for axis in domains:
-            for bucket in range(4):
+            for bucket in range(5):
                 rows = buckets[(axis, bucket)]
                 source_line_numbers = [line_number for line_number, _ in rows]
                 text = "\n\n".join(value for _, value in rows)
@@ -96,11 +97,11 @@ def prepare(source: Path, output: Path, receipt: Path, expected_sha256: str, see
             "records": source_rows,
         },
         "method": {
-            "name": "axis-preserving-hash-buckets-v1",
+            "name": "axis-preserving-five-role-hash-buckets-v2",
             "seed": seed,
-            "buckets_per_axis": 4,
+            "buckets_per_axis": 5,
             "join_separator": "\\n\\n",
-            "assignment_key": "sha256(seed\\0axis\\0one_based_source_line) mod 4",
+            "assignment_key": "sha256(seed\\0axis\\0one_based_source_line) mod 5",
         },
         "output": {
             "path": str(output.resolve()),

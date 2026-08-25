@@ -10,6 +10,7 @@ OUTPUT_ROOT=${OUTPUT_ROOT:-${RUN_ROOT}/streaming-fit}
 LOG_ROOT=${LOG_ROOT:-${RUN_ROOT}/logs}
 LAYERS=${LAYERS:-48}
 WAVE_SIZE=${WAVE_SIZE:-8}
+FIT_DEVICE_COUNT=${FIT_DEVICE_COUNT:-2}
 MODEL_REVISION=${MODEL_REVISION:-1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9}
 
 export PYTHONPATH="${CODE_ROOT}/src:${RUN_ROOT}/encoding-site${PYTHONPATH:+:${PYTHONPATH}}"
@@ -19,6 +20,11 @@ export MKL_NUM_THREADS=${MKL_NUM_THREADS:-8}
 export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-8}
 
 mkdir -p "${OUTPUT_ROOT}" "${LOG_ROOT}"
+
+if ((FIT_DEVICE_COUNT < 1)); then
+    printf 'FIT_DEVICE_COUNT must be positive\n' >&2
+    exit 2
+fi
 
 complete() {
     local layer=$1
@@ -33,7 +39,7 @@ launch() {
     local layer=$1
     local label device log exit_file
     label=$(printf '%03d' "${layer}")
-    device=$((layer % 2))
+    device=$((layer % FIT_DEVICE_COUNT))
     log="${LOG_ROOT}/streaming-fit-layer-${label}.log"
     exit_file="${LOG_ROOT}/streaming-fit-layer-${label}.exit"
     if test -f "${exit_file}"; then

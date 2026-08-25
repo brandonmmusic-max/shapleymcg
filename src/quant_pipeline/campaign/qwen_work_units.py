@@ -27,6 +27,9 @@ from ..candidates.ledger import (
     build_expert_candidate_input,
     conditional_down_fit_batch_sha256,
     routed_batch_sha256,
+    _codec_candidates,
+    _conditional_down_hessian,
+    _tensor_record,
 )
 from ..core.artifacts import canonical_json, sha256_bytes, sha256_file, write_json
 from ..normalization.absolute_v31 import MatrixInput
@@ -90,6 +93,11 @@ def _load_capture_component(context: Mapping[str, Any], purpose: str) -> tuple[P
     if seal != _hash_json({key: value for key, value in service.items() if key != "capture_service_sha256"}):
         raise ValueError("capture service seal mismatch")
     component = service["captures"][purpose]
+    expected_role = {"fit": "fit", "heldout": "selection", "conditional_down": "conditional_fit"}.get(purpose)
+    if expected_role is not None and component.get("role") != expected_role:
+        raise ValueError(
+            f"capture component {purpose} must use role {expected_role}; confirmation is prospective-only"
+        )
     manifest_path = (service_path.parent / component["manifest"]).resolve()
     if service_path.parent.resolve() not in manifest_path.parents or manifest_path.is_symlink():
         raise ValueError("capture component manifest escapes its stage artifact")
@@ -211,6 +219,7 @@ def _all_expert_batches(
             batch_id = f"{metadata['role']}:{metadata['window_index']}:L{layer}:E{expert}"
             if conditional:
                 identity = {
+                    "role": str(metadata["role"]),
                     "conditional_down_fit_artifact_sha256": artifact_sha,
                     "row_identity_sha256": _hash_json(rows),
                     "document_sha256": document_sha,
@@ -239,6 +248,7 @@ def _all_expert_batches(
                         raise ValueError("Qwen Fisher capture must have one batch dimension per sealed window")
                     fisher = raw[:, 0, offsets].contiguous()
                 identity = {
+                    "role": str(metadata["role"]),
                     "document_sha256": document_sha,
                     "heldout_artifact_sha256": artifact_sha,
                     "capture_artifact_sha256": artifact_sha,
@@ -414,24 +424,49 @@ def _make_units(
     return result
 
 
-def _score_units(units: Sequence[Any], codec: Any) -> tuple[float, float]:
+def _score_units(units: Sequence[Any], codec: Any) -> tuple[float, float, dict[str, dict[str, Any]]]:
     import torch
     import torch.nn.functional as functional
 
     proxy = 0.0
     heldout = 0.0
+    candidate_identities: dict[str, dict[str, Any]] = {}
     for item in units:
-        encoded = {}
+        generated = _codec_candidates(
+            codec,
+            item,
+            [(4, 4, 4)],
+            {"proposal_score": True, "layer": item.layer, "expert": item.expert},
+        )
+        candidates = {
+            "gate_proj": generated["gate_proj"][4],
+            "up_proj": generated["up_proj"][4],
+            "down_proj": generated["down_proj"][(4, 4)][4],
+        }
+        encoded = {name: candidate.reconstructed for name, candidate in candidates.items()}
+        conditional_down = _conditional_down_hessian(
+            item, encoded["gate_proj"], encoded["up_proj"]
+        )
+        identity = {}
+        for score_name, projection in (
+            ("gate_proj", "gate_proj"),
+            ("up_proj", "up_proj"),
+            ("down_proj.g4u4", "down_proj"),
+        ):
+            candidate = candidates[projection]
+            identity[score_name] = {
+                "bits": 4,
+                "packed_sha256": candidate.packed_sha256,
+                "reconstruction_deployed_fp16_sha256": candidate.reconstruction_sha256,
+                "reconstruction_hf_sha256": _tensor_record(candidate.reconstructed)["sha256"],
+            }
+        candidate_identities[item.unit_id] = identity
         for projection in ("gate_proj", "up_proj", "down_proj"):
             fit = item.fitted[projection]
-            candidate = codec.encode_candidates(
-                unit_id=f"{item.unit_id}.{projection}", weight_hf=getattr(item.source, projection),
-                covariance=fit.covariance, bits=(4,), input_vector=fit.bit_vectors[4][0],
-                output_vector=fit.bit_vectors[4][1], provenance={"proposal-score": True},
-            )[4]
-            encoded[projection] = candidate.reconstructed
+            candidate = candidates[projection]
             residual = getattr(item.source, projection).float() - candidate.reconstructed.float()
-            proxy += float(torch.einsum("nk,kl,nl->", residual, torch.as_tensor(fit.covariance).float(), residual).item())
+            covariance = conditional_down if projection == "down_proj" else fit.covariance
+            proxy += float(torch.einsum("nk,kl,nl->", residual, torch.as_tensor(covariance).float(), residual).item())
         for batch in item.heldout_batches:
             x = torch.as_tensor(batch.hidden_states).to(torch.bfloat16)
             gate0 = functional.linear(x, item.source.gate_proj.to(torch.bfloat16))
@@ -442,7 +477,7 @@ def _score_units(units: Sequence[Any], codec: Any) -> tuple[float, float]:
             y1 = functional.linear(functional.silu(gate1) * up1, encoded["down_proj"].to(torch.bfloat16))
             weights = torch.as_tensor(batch.route_weights).float().unsqueeze(1)
             heldout += float(((y0.float() - y1.float()).pow(2) * weights.pow(2)).sum().item())
-    return proxy, heldout
+    return proxy, heldout, candidate_identities
 
 
 def materialize_candidate_work_units(
@@ -522,10 +557,17 @@ def materialize_candidate_work_units(
                     layer=layer, source=proposal_source, fits=proposal_fits, artifact=artifact,
                     heldout=heldout, conditional=conditional, codec=codec, config=config,
                 )
-                proxy, held = _score_units(units, codec)
-                cache["units"] = units
+                proxy, held, candidate_identities = _score_units(units, codec)
+                cache["units"] = [
+                    replace(
+                        unit,
+                        proposal_score_candidate_identity=candidate_identities[unit.unit_id],
+                    )
+                    for unit in units
+                ]
                 cache["proxy"] = proxy
                 cache["heldout"] = held
+                cache["candidate_identities"] = candidate_identities
                 return proxy, held
             evaluator_sha = _hash_json({"implementation": "exact-r10-k4-proxy-and-bf16-full-expert", "codec": _hash_json(codec.identity)})
             evaluated = evaluate_additive_v31_candidate(
@@ -546,6 +588,7 @@ def materialize_candidate_work_units(
                 "artifact_sha256": evaluated.artifact.content_sha256,
                 "exact_codec_proxy": evaluated.exact_codec_proxy.__dict__,
                 "heldout_full_expert": evaluated.heldout_full_expert.__dict__,
+                "proposal_score_candidate_identity_sha256": _hash_json(cache["candidate_identities"]),
             }
             row["proposal_sha256"] = _hash_json(row)
             proposal_rows.append(row)

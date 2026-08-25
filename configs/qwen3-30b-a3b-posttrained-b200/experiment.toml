@@ -14,6 +14,7 @@ tokenizer_id = "Qwen/Qwen3-30B-A3B"
 window_tokens = 2048
 seed = 20260823
 fit_windows = 32
+conditional_fit_windows = 16
 selection_windows = 16
 confirmation_windows = 16
 final_windows = 25

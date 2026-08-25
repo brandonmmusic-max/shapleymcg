@@ -57,6 +57,43 @@ def test_streaming_fit_accepts_repository_canonical_source_seal(tmp_path):
     assert namespace["_source_identity"](tmp_path / "source.json", revision) == receipt["receipt_sha256"]
 
 
+def test_fast_encoder_accepts_only_explicit_canonical_or_legacy_v1_source_seals(tmp_path):
+    namespace = runpy.run_path(str(ROOT / "scripts/run_qwen_fast_encode.py"))
+    revision = "1b75feb79f60b8dc6c5bc769a898c206a1c6a4f9"
+    body = {
+        "schema": "quant-pipeline.qwen-source-receipt.v1",
+        "revision": revision,
+        "files": {"model.safetensors": {"bytes": 1, "sha256": "1" * 64}},
+    }
+    canonical = dict(body)
+    canonical["receipt_sha256"] = sha256_bytes(canonical_json(body))
+    canonical_path = tmp_path / "canonical.json"
+    canonical_path.write_text(json.dumps(canonical))
+    assert namespace["_source_identity"](canonical_path) == (
+        canonical["receipt_sha256"],
+        revision,
+        "canonical-json-with-trailing-newline",
+    )
+
+    legacy = dict(body)
+    legacy_bytes = json.dumps(
+        body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    ).encode()
+    legacy["receipt_sha256"] = hashlib.sha256(legacy_bytes).hexdigest()
+    legacy_path = tmp_path / "legacy.json"
+    legacy_path.write_text(json.dumps(legacy))
+    assert namespace["_source_identity"](legacy_path) == (
+        legacy["receipt_sha256"],
+        revision,
+        "legacy-v1-canonical-json-without-trailing-newline",
+    )
+
+    legacy["schema"] = "unrelated-schema"
+    legacy_path.write_text(json.dumps(legacy))
+    with pytest.raises(ValueError, match="seal mismatch"):
+        namespace["_source_identity"](legacy_path)
+
+
 def test_hybrid_k4_plan_is_nonmutating_and_names_three_arms(tmp_path):
     output = tmp_path / "comparison"
     result = run(

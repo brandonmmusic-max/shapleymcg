@@ -17,7 +17,7 @@ and
 [`method specification`](https://github.com/brandonmmusic-max/shapleymcg/blob/main/docs/SHAPLEYMCG_METHOD.md)
 distinguish the predecessor routed-p2 allocator from the full causal method.
 The fresh machine-readable
-[`Base completion audit`](./audits/completion-audit-20260824.json) records the
+[`Base completion audit`](https://github.com/brandonmmusic-max/shapleymcg/blob/main/results/qwen3-30b-a3b-base/completion-audit-20260824.json) records the
 immutable tree identities, layer receipt closure, model-manifest audit, corpus
 lineage hashes, and independent KLD replay used for final verification.
 
@@ -131,7 +131,7 @@ claimed by these KLD artifacts.
   [*Saturation Makes Quantization Error Additive*](https://arxiv.org/abs/2607.12266),
   and [NVIDIA Model Optimizer PR #2183](https://github.com/NVIDIA/Model-Optimizer/pull/2183).
 - Routed Fisher/Jacobian attribution, explicit residual reconciliation, MCG
-  integration, experiments, and publication: Brandon Music / ShapleyMCG.
+  integration, experiments, and publication: Brandon M. Music / ShapleyMCG.
 
 See the repository's `docs/REFERENCES.md`, `THIRD_PARTY_NOTICES.md`, and
 `THIRD_PARTY_LICENSES` for complete citations and license boundaries.

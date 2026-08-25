@@ -62,16 +62,14 @@ allocation choose better placements than the prior Hessian/router method. The
 20k result is the primary estimate because it is broader; the same-direction
 2,047-position result is a replication on a separate sealed window.
 
-The earlier reconstructed Hill-style BFCL/RULER panel remains useful but answers
-a different question. The historical ShapleyMCG predecessor pipeline measured
-`0.018260861970005038` over 32,752 positions, 48.3% below the paper's reported
-`0.0353` additive row and 57.4% below its `0.0429` ModelOpt row. That is strong
-cross-system evidence for the complete candidate/codec/allocation pipeline,
-especially because its stated rate was slightly lower. It is not an estimate
-of the new allocator's advantage over Hill: the exact author tokens were not
-published, the parent checkpoint and activation/runtime arithmetic differ, and
-the new causal allocation has not yet been measured on that reconstructed
-panel.
+The earlier reconstructed Hill-style BFCL/RULER panel remains useful only as
+numerical context. The historical ShapleyMCG predecessor pipeline measured
+`0.018260861970005038` over 32,752 positions, while the paper reports `0.0353`
+for its additive row and `0.0429` for its ModelOpt row. No superiority inference
+follows: the exact author tokens were not published, the parent checkpoint,
+quantized scope, and activation/runtime arithmetic differ, and routed-expert
+BPW is not the paper's whole-model effective-bit measure. The new causal
+allocation has also not been measured on that reconstructed panel.
 
 Accordingly, the supported claim is:
 

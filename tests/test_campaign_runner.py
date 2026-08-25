@@ -49,14 +49,26 @@ def _quantize(value: np.ndarray, bits: int) -> np.ndarray:
 class TinyMoeAdapter:
     """Deterministic numeric adapter used only to exercise the real runner contract."""
 
-    def __init__(self, *, fail_once: str | None = None, gate_passes: bool = True):
+    def __init__(
+        self,
+        *,
+        fail_once: str | None = None,
+        gate_passes: bool = True,
+        confirmation_passes: bool = True,
+    ):
         self.calls: dict[str, int] = {}
         self.fail_once = fail_once
         self.gate_passes = gate_passes
+        self.confirmation_passes = confirmation_passes
 
     def identity(self):
         # Runtime counters are deliberately absent: they do not alter scientific behavior.
-        return {"name": "deterministic-tiny-moe", "version": 1, "gate_passes": self.gate_passes}
+        return {
+            "name": "deterministic-tiny-moe",
+            "version": 1,
+            "gate_passes": self.gate_passes,
+            "confirmation_passes": self.confirmation_passes,
+        }
 
     def preflight(self, plan):
         return {
@@ -144,6 +156,42 @@ class TinyMoeAdapter:
             choices = [min((row for row in candidates if row["layer"] == layer), key=lambda row: (row["damage"], row["stored_bytes"])) for layer in range(len(weights))]
             write_json(request.output_dir / "allocation.json", {"choices": choices})
             metadata["stored_bytes"] = sum(row["stored_bytes"] for row in choices)
+        elif kind == "confirmation":
+            allocation = json.loads(
+                (_artifact_path(request, "allocation") / "allocation.json").read_text()
+            )
+            reconstructed = weights.copy()
+            for choice in allocation["choices"]:
+                reconstructed[int(choice["layer"])] = _quantize(
+                    weights[int(choice["layer"])], int(choice["bits"])
+                )
+            reference = features.copy()
+            student = features.copy()
+            for source_matrix, candidate_matrix in zip(weights, reconstructed, strict=True):
+                reference = np.tanh(reference @ source_matrix)
+                student = np.tanh(student @ candidate_matrix)
+            value = _kld(reference, student)
+            reference_path = request.output_dir / "confirmation-reference.npy"
+            capture_path = request.output_dir / "confirmation-student.npy"
+            np.save(reference_path, reference)
+            np.save(capture_path, student)
+            threshold = (
+                value + 1e-9
+                if self.confirmation_passes
+                else max(0.0, value - 1e-9)
+            )
+            metadata["gate"] = {
+                "passed": self.confirmation_passes,
+                "metric": "kld",
+                "value": value,
+                "threshold": threshold,
+                "reference_sha256": sha256_file(reference_path),
+                "capture_sha256": sha256_file(capture_path),
+            }
+            metadata["gate_files"] = {
+                "reference": reference_path.name,
+                "capture": capture_path.name,
+            }
         elif kind == "causal_fit_capture":
             installed = self._encoded_weights(request)
             hidden = features.copy()
@@ -385,6 +433,30 @@ def test_tiny_moe_campaign_runs_causally_end_to_end(tmp_path):
     assert final == "final_kld"
 
 
+def test_post_freeze_confirmation_is_a_real_admission_gate(tmp_path):
+    definition, _ = _campaign_files(tmp_path, layers=(0,), interval=1, policy="continue")
+    campaign = tmp_path / "campaign"
+    adapter = TinyMoeAdapter(confirmation_passes=False)
+    plan = create_plan(definition, campaign, adapter)
+    stages = {row["stage_id"]: row for row in plan["stages"]}
+    assert tuple(stages["confirmation"]["dependencies"]) == ("candidates", "allocation")
+    assert "confirmation" in stages["causal_fit_capture.layer_000"]["dependencies"]
+
+    result = CampaignRunner(campaign, adapter).execute()
+    assert result["complete"] is False
+    assert result["generation"] == 1
+    assert result["next_stage"] == "allocation"
+    assert "causal_fit_capture.layer_000" not in adapter.calls
+    decision = next(
+        event
+        for event in EventJournal(campaign / "events.jsonl").read()
+        if event["event"] == "gate_decision" and event["kind"] == "confirmation"
+    )
+    assert decision["details"]["gate"]["passed"] is False
+    # A historical re-anchor policy of `continue` cannot bypass this gate.
+    assert decision["details"]["action"] == "request_reallocation"
+
+
 def test_every_causal_stage_binds_complete_five_layer_installed_prefix(tmp_path):
     definition, _ = _campaign_files(tmp_path, layers=(0, 1, 2, 3, 4), interval=3)
     campaign = tmp_path / "campaign"
@@ -415,7 +487,11 @@ def test_resume_reconstructs_gate_decision_without_rerunning_sealed_reanchor(tmp
 
     def crash_before_gate(body):
         nonlocal crashed
-        if not crashed and body.get("event") == "gate_decision":
+        if (
+            not crashed
+            and body.get("event") == "gate_decision"
+            and body.get("kind") == "kld_reanchor"
+        ):
             crashed = True
             raise KeyboardInterrupt("after sealed reanchor")
         return original_append(body)
@@ -511,7 +587,11 @@ def test_torn_gate_decision_tail_recovers_and_reconstructs_gate_once(tmp_path):
 
     def tear_gate_decision(body):
         nonlocal crashed
-        if not crashed and body.get("event") == "gate_decision":
+        if (
+            not crashed
+            and body.get("event") == "gate_decision"
+            and body.get("kind") == "kld_reanchor"
+        ):
             crashed = True
             with (campaign / "events.jsonl").open("ab") as handle:
                 handle.write(b'{"event":"gate_decision"')
@@ -550,7 +630,11 @@ def test_torn_gate_tail_recovers_noncontinue_decision_and_supersession(tmp_path,
 
     def tear_gate_decision(body):
         nonlocal torn
-        if not torn and body.get("event") == "gate_decision":
+        if (
+            not torn
+            and body.get("event") == "gate_decision"
+            and body.get("kind") == "kld_reanchor"
+        ):
             torn = True
             with (campaign / "events.jsonl").open("ab") as handle:
                 handle.write(b'{"event":"gate_decision"')
@@ -569,7 +653,10 @@ def test_torn_gate_tail_recovers_noncontinue_decision_and_supersession(tmp_path,
     assert resumed["pending_supersession"] is None
     events = EventJournal(campaign / "events.jsonl").read()
     assert [event["event"] for event in events].count("journal_tail_recovered") == 1
-    assert [event["event"] for event in events].count("gate_decision") == 1
+    assert sum(
+        event["event"] == "gate_decision" and event.get("kind") == "kld_reanchor"
+        for event in events
+    ) == 1
     assert [event["event"] for event in events].count("generation_superseded") == 1
 
 
@@ -605,7 +692,10 @@ def test_torn_supersession_tail_recovers_after_gate_exactly_once(tmp_path, polic
     assert resumed["pending_supersession"] is None
     events = EventJournal(campaign / "events.jsonl").read()
     assert [event["event"] for event in events].count("journal_tail_recovered") == 1
-    assert [event["event"] for event in events].count("gate_decision") == 1
+    assert sum(
+        event["event"] == "gate_decision" and event.get("kind") == "kld_reanchor"
+        for event in events
+    ) == 1
     assert [event["event"] for event in events].count("generation_superseded") == 1
 
 
@@ -731,7 +821,10 @@ def test_generation_cap_allows_boundary_then_fails_closed_without_history_deleti
     assert capped["pending_supersession"] == "kld_reanchor.block_000"
     events_before = EventJournal(campaign / "events.jsonl").read()
     assert [event["event"] for event in events_before].count("generation_superseded") == 1
-    assert [event["event"] for event in events_before].count("gate_decision") == 2
+    assert sum(
+        event["event"] == "gate_decision" and event.get("kind") == "kld_reanchor"
+        for event in events_before
+    ) == 2
 
     with pytest.raises(RuntimeError, match="generation cap reached"):
         CampaignRunner(campaign, adapter).execute(resume=True)

@@ -287,6 +287,9 @@ def test_qwen_fitter_service_streams_one_layer_and_retains_only_objective_power(
         "predecessor_state_hash": H,
         "input_identities": {"source_checkpoint": H},
     })
+    assert result["transient_files"]
+    assert "fit-manifest.json" not in result["transient_files"]
+    assert all((output / relative).is_file() for relative in result["transient_files"])
     fitted = json.loads((output / result["fit_manifest_file"]).read_text())
     assert fitted["layers"] == [0]
     assert fitted["estimator"]["retained_powers"] == [2]
@@ -366,6 +369,89 @@ def test_multi_role_local_capture_loads_and_replays_model_once(tmp_path, monkeyp
     assert set(result) == {"fit", "selection", "confirmation"}
     assert all(result[role]["request"]["model_revision"] == "a" * 40 for role in result)
     assert all(result[role]["request"]["installed_replay"]["accepted_prefix_length"] == 0 for role in result)
+
+
+def test_distinct_capture_checkpoint_is_sealed_into_request(tmp_path, monkeypatch):
+    tokens = [1, 2, 3, 4]
+    windows = {
+        role: [{
+            "document_id": f"doc-{role}",
+            "domain": "fixture",
+            "token_ids": tokens,
+            "token_sha256": sha256_bytes(canonical_json(tokens)),
+        }]
+        for role in ("fit", "selection", "confirmation", "final")
+    }
+    corpus = {
+        "schema": "quant-pipeline.sealed-corpus.v1",
+        "seed": 7,
+        "window_tokens": 4,
+        "minimum_domains": 1,
+        "tokenizer": {},
+        "source": {},
+        "role_counts": {role: 1 for role in windows},
+        "windows": windows,
+    }
+    corpus["seal_sha256"] = sha256_bytes(canonical_json(corpus))
+    corpus_path = tmp_path / "corpus.json"
+    write_json(corpus_path, corpus)
+    source = tmp_path / "source"
+    capture_checkpoint = tmp_path / "capture-model"
+    source.mkdir()
+    capture_checkpoint.mkdir()
+    model = TinyModel().eval()
+    loaded = []
+
+    def from_pretrained(path, **_kwargs):
+        loaded.append(Path(path))
+        return model
+
+    import transformers
+    monkeypatch.setattr(transformers.AutoModelForCausalLM, "from_pretrained", from_pretrained)
+    identity = {
+        "schema": "quant-pipeline.qwen-capture-checkpoint-identity.v1",
+        "kind": "sealed-causal-reconstruction",
+        "source_revision": "a" * 40,
+        "model_manifest_sha256": "b" * 64,
+    }
+    identity["capture_checkpoint_sha256"] = sha256_bytes(canonical_json(identity))
+    result = capture_roles_from_local_bf16(
+        source_checkpoint=source,
+        capture_checkpoint=capture_checkpoint,
+        capture_checkpoint_identity=identity,
+        model_revision="a" * 40,
+        sealed_corpus=corpus_path,
+        captures=[{
+            "purpose": "fit",
+            "role": "fit",
+            "output_dir": str(tmp_path / "fit"),
+        }],
+        layers=[0, 1],
+        predecessor_state_hash=H,
+        production_geometry=False,
+    )
+    assert loaded == [capture_checkpoint.resolve()]
+    assert result["fit"]["request"]["capture_checkpoint"] == identity
+
+
+def test_distinct_capture_checkpoint_requires_identity(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    capture_checkpoint = tmp_path / "capture-model"
+    source.mkdir()
+    capture_checkpoint.mkdir()
+    corpus_path = tmp_path / "corpus.json"
+    corpus_path.write_text("{}")
+    with pytest.raises(ValueError, match="requires a sealed"):
+        capture_roles_from_local_bf16(
+            source_checkpoint=source,
+            capture_checkpoint=capture_checkpoint,
+            model_revision="a" * 40,
+            sealed_corpus=corpus_path,
+            captures=[],
+            layers=[0],
+            predecessor_state_hash=H,
+            production_geometry=False,
+        )
 
 
 def test_independent_final_kld_and_pinned_checkpoint_audit_ignore_provider_assertions(tmp_path):

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from quant_pipeline.scoring.attribution import (
     aumann_shapley,
@@ -6,6 +7,7 @@ from quant_pipeline.scoring.attribution import (
     quadratic_expert_attribution,
     reconcile_explicit_remainder,
     split_layer_damage,
+    reconcile_layer_components_for_allocation,
 )
 
 
@@ -28,6 +30,20 @@ def test_expert_quadratic_attribution_includes_cross_terms():
     assert np.isclose(shares.sum(), 0.5 * np.mean(total**2))
 
 
+def test_expert_path_attribution_uses_gauss_legendre_not_uniform_node_weights():
+    _nodes, weights = np.polynomial.legendre.leggauss(3)
+    weights = weights / 2.0
+    # The center node has larger Gauss-Legendre mass. A nonlinear node profile
+    # therefore differs materially from a uniform mean.
+    z = np.asarray([[[1.0], [9.0], [2.0]], [[0.5], [-1.0], [3.0]]])
+    weighted = quadratic_expert_attribution(z, weights)
+    uniform = quadratic_expert_attribution(z)
+    assert not np.allclose(weighted, uniform)
+    total = z.sum(axis=0)
+    expected_total = 0.5 * np.sum(weights[:, None] * total**2)
+    assert weighted.sum() == pytest.approx(expected_total)
+
+
 def test_routing_residual_is_a_joint_cross_term_participant():
     split = split_layer_damage(
         6.0,
@@ -46,6 +62,22 @@ def test_reconciliation_does_not_rescale_raw_values():
     np.testing.assert_array_equal(accounting.raw, [0.2, -0.1])
     assert np.isclose(accounting.closure_residual, 0.4)
     assert np.isclose(accounting.reconciled.sum(), 0.5)
+
+
+def test_layer_reconciliation_keeps_signed_components_and_labels_redistribution():
+    result = reconcile_layer_components_for_allocation(
+        expert_direct=[0.3, -0.1],
+        routing_state_shift=0.2,
+        explicit_residual=0.1,
+        raw_layer_damage=0.5,
+        reconciled_layer_damage=0.75,
+    )
+    np.testing.assert_allclose(result["expert_direct_reconciled"], [0.45, -0.15])
+    assert result["routing_state_shift_reconciled"] == pytest.approx(0.3)
+    assert result["within_layer_unresolved_remainder_reconciled"] == pytest.approx(0.15)
+    assert result["reconciled_component_total"] == pytest.approx(0.75)
+    assert sum(result["expert_allocation_score_reconciled"]) == pytest.approx(0.75)
+    assert result["expert_redistribution_policy"] == "absolute-direct-magnitude-proportional-v1"
 
 
 def test_conditional_damage_matches_direct_energy_difference():
