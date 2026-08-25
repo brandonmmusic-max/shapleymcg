@@ -22,6 +22,11 @@ HF_RESULT_PREFIX=${HF_RESULT_PREFIX:-results/qwen3-30b-a3b-base/progressive-cand
 HF_TOKEN_SOURCE=${HF_TOKEN_SOURCE:-/root/.cache/huggingface/token}
 DRIVER_PID_FILE=${DRIVER_PID_FILE:-${RUN_ROOT}/logs/progressive-pipeline.pid}
 VALIDATION_ROOT=${VALIDATION_ROOT:-${RUN_ROOT}/frozen-causal-rate-validation-v1}
+CONTROL_BUNDLE=${CONTROL_BUNDLE:-/artifacts/shapleymcg/qwen3-30b-a3b-v1/control-bundle-v1}
+BASE_CONTROL_REVISION=${BASE_CONTROL_REVISION:-c9c2b001dd943b8251fc0102ec76ab1b8d572219}
+BASE_CONTROL_PREFIX=${BASE_CONTROL_PREFIX:-controls/fixed-hadamard-k34-v1}
+GLM_MODEL_REPO=${GLM_MODEL_REPO:-brandonmusic/GLM-5.2-EXL3-TR3v4-3.5bpw-MTP78}
+GLM_MODEL_REVISION=${GLM_MODEL_REVISION:-7c73450f05a151439d0f184f216b1eefcc394a31}
 LOG_ROOT=${LOG_ROOT:-${RUN_ROOT}/logs}
 POLL_SECONDS=${POLL_SECONDS:-30}
 
@@ -168,6 +173,22 @@ if ! test -s "${union_output}/report.json"; then
         --seed 20260825 \
         --execute \
         2>&1 | tee "${LOG_ROOT}/progressive-native-factory-union.log"
+fi
+
+lineage_output="${VALIDATION_ROOT}/glm-lineage"
+if ! test -s "${lineage_output}/lineage.json"; then
+    "${PYTHON}" "${CODE_ROOT}/scripts/bind_qwen_glm_lineage.py" \
+        --control-bundle "${CONTROL_BUNDLE}" \
+        --fast-kld-root "${RUN_ROOT}/fast-k34-kld-sdpa" \
+        --qwen-dataset-repo "${HF_REPO}" \
+        --qwen-dataset-revision "${BASE_CONTROL_REVISION}" \
+        --qwen-control-prefix "${BASE_CONTROL_PREFIX}" \
+        --glm-model-repo "${GLM_MODEL_REPO}" \
+        --glm-model-revision "${GLM_MODEL_REVISION}" \
+        --glm-calibration-path calibration/reap_recall_calib.jsonl \
+        --output "${lineage_output}" \
+        --execute \
+        2>&1 | tee "${LOG_ROOT}/progressive-glm-lineage.log"
 fi
 
 "${PYTHON}" "${CODE_ROOT}/scripts/seal_artifact_tree.py" \
