@@ -64,6 +64,22 @@ def test_hash_fields_are_exact_or_explicit_required_placeholders():
     ]
     assert all(SHA256.fullmatch(value) or PLACEHOLDER.fullmatch(value) for value in values)
     assert any(PLACEHOLDER.fullmatch(value) for value in values)
+    source_manifest = json.loads(
+        (CONFIG / "corrected-exl3-source-manifest.json").read_text()
+    )
+    canonical_files = (
+        json.dumps(
+            source_manifest["files"],
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode()
+    assert artifact["exl3"]["source_closure_sha256"] == hashlib.sha256(
+        canonical_files
+    ).hexdigest()
 
 
 def test_environment_manifest_is_exactly_versioned_and_requires_machine_seals():
@@ -186,9 +202,21 @@ def test_scripts_and_runbook_expose_fail_closed_boundaries():
 def test_distribution_configuration_includes_reproducibility_assets():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
     included = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
-    for name in ("THIRD_PARTY_LICENSES", "configs", "docs", "environments", "examples", "scripts"):
+    for name in (
+        "THIRD_PARTY_LICENSES",
+        "configs",
+        "docs",
+        "environments",
+        "examples",
+        "reproducibility",
+        "scripts",
+    ):
         assert name in included
     b12x_license = ROOT / "THIRD_PARTY_LICENSES/B12X-APACHE-2.0.txt"
     assert hashlib.sha256(b12x_license.read_bytes()).hexdigest() == (
         "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    )
+    exllamav3_license = ROOT / "THIRD_PARTY_LICENSES/EXLLAMAV3-MIT.txt"
+    assert hashlib.sha256(exllamav3_license.read_bytes()).hexdigest() == (
+        "93ccc2f4c97c03bc767c611c75f3bb16b97e49606f5cd3ca05d7f6201ff8f8de"
     )

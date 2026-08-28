@@ -18,6 +18,24 @@ numbers are kept separately in **[RESULTS.md](RESULTS.md)**. Exact hashes,
 revisions, and remote receipts are in the
 [Qwen evidence ledger](docs/QWEN_COMPLETE_RESULTS_LEDGER.md).
 
+## Bundled corrected EXL3/MCG encoder
+
+The complete R10 Python encoder closure is now checked in under
+[`reproducibility/r10/`](reproducibility/r10/). It includes
+`r7_encoder/r10_codec.py` (`R10TrellisCodec`), every supporting
+`r7_encoder` module, and the pinned `lineage/encode_tr3_v31.py` numeric
+core. The files match the immutable prior-control publication byte for byte.
+
+```bash
+python3 reproducibility/r10/verify_bundle.py
+```
+
+Use `reproducibility/r10` as `Exl3MCGCodec.source_root` and
+`reproducibility/r10/lineage/encode_tr3_v31.py` as `numeric_core`. A
+machine-specific `exllamav3_ext` remains a separate, explicitly supplied and
+hash-bound build input. The [bundle README](reproducibility/r10/README.md)
+documents the exact identities, adapter example, lineage boundary, and license.
+
 ## Read this status boundary first
 
 The repository contains three different kinds of material. They must not be

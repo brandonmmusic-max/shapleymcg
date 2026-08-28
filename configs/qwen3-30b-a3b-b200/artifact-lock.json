@@ -22,7 +22,7 @@
     "corrected_source_repository": "brandonmusic/GLM-5.2-EXL3-TR3v4-3.5bpw-MTP78",
     "corrected_source_revision": "7c73450f05a151439d0f184f216b1eefcc394a31",
     "corrected_source_manifest_sha256": "e224af1d9f80ab99b088f224b8ade678c9e7873498924feecad1b7cacad3dd2f",
-    "source_closure_sha256": "__REQUIRED_CORRECTED_R10_SOURCE_CLOSURE_SHA256__",
+    "source_closure_sha256": "d2be4a3c9ab279689b00c87d3edf160e9256dec8da66391bc248137ee639ea67",
     "numeric_core_sha256": "e9a85a47e165c8d8644354cef611efbb81dfd9ba88544ca59f0c80ee6bc75032",
     "r10_codec_sha256": "8b31fb8d1214df63fa1557175a926f6d2d680d69d2cb3689d1df4b5c62a1eded",
     "sm100_extension_sha256": "__REQUIRED_BUILT_SM100_EXTENSION_SHA256__"
@@ -44,7 +44,6 @@
     "corpus.calibration_jsonl_sha256",
     "corpus.sealed_corpus_sha256",
     "corpus.kld_window_sha256",
-    "exl3.source_closure_sha256",
     "exl3.sm100_extension_sha256"
   ]
 }

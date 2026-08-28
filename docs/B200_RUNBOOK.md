@@ -67,10 +67,19 @@ Qwen `LICENSE` with the checkpoint.
 
 The competitive codec adapter requires Brandon M. Music's corrected R10
 `r7_encoder` Python closure and the pinned `encode_tr3_v31.py` numeric core.
-They are published with the prior GLM-5.2 model. The repository includes a
-per-file SHA256 manifest and a dry-run-by-default downloader pinned to HF commit
-`7c73450f05a151439d0f184f216b1eefcc394a31`. The downloaded upstream license
-is preserved and remains controlling for those files.
+An exact copy is bundled at `reproducibility/r10`; verify and use it without
+a network download:
+
+```bash
+python reproducibility/r10/verify_bundle.py
+export CORRECTED_R10_ROOT="$PWD/reproducibility/r10"
+export EXL3_NUMERIC_CORE="$CORRECTED_R10_ROOT/lineage/encode_tr3_v31.py"
+```
+
+The same files remain published with the prior GLM-5.2 model. The repository
+also retains a per-file SHA256 manifest and dry-run-by-default downloader pinned
+to HF commit `7c73450f05a151439d0f184f216b1eefcc394a31` for an independently
+downloaded copy. The upstream license is preserved in either path.
 
 ```bash
 # Preview the exact repository, revision, paths, and file count:

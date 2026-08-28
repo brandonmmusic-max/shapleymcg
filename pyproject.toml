@@ -30,6 +30,7 @@ packages = ["src/quant_pipeline"]
 "docs" = "quant_pipeline/resources/docs"
 "environments" = "quant_pipeline/resources/environments"
 "examples" = "quant_pipeline/resources/examples"
+"reproducibility" = "quant_pipeline/resources/reproducibility"
 "scripts" = "quant_pipeline/resources/scripts"
 
 [tool.hatch.build.targets.sdist]
@@ -42,6 +43,7 @@ include = [
   "/docs",
   "/environments",
   "/examples",
+  "/reproducibility",
   "/scripts",
   "/src",
   "/tests",
